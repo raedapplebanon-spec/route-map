@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <title>Route Map</title>
+
+  <!-- External CSS -->
+  <link
+    rel="stylesheet"
+    href="https://yrhhdstnolguxmesxnnv.supabase.co/storage/v1/object/public/maps/style.css"
+  />
+
+  <!-- Google Maps API -->
+  <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCYaJ4Gjq36mq8swYgjNXOYr5mKZi45niA"></script>
+
+  <!-- External JS (initMap + setRouteData) -->
+  <script src="https://yrhhdstnolguxmesxnnv.supabase.co/storage/v1/object/public/maps/map_script.js" defer></script>
+
+  <!-- URL Parameter Reader -->
+  <script>
+    function readParamsAndSend() {
+      const params = new URLSearchParams(window.location.search);
+
+      const routeData = params.get("routeData") || "[]";
+      const availableData = params.get("availableData") || "[]";
+
+      if (window.setRouteData && window.initMap) {
+        window.setRouteData(routeData, availableData);
+      } else {
+        setTimeout(readParamsAndSend, 150);
+      }
+    }
+
+    window.onload = readParamsAndSend;
+  </script>
+</head>
+
+<body>
+  <div id="map"></div>
+
+  <div class="legend">
+    <div class="legend-row">
+      <div class="legend-color" style="background:#00c853"></div>
+      <span>البداية</span>
+    </div>
+    <div class="legend-row">
+      <div class="legend-color" style="background:#d50000"></div>
+      <span>النهاية</span>
+    </div>
+    <div class="legend-row">
+      <div class="legend-color" style="background:#1a73e8"></div>
+      <span>محطات داخل الخط</span>
+    </div>
+    <div class="legend-row">
+      <div class="legend-color" style="background:#ff9100"></div>
+      <span>طلاب غير مضافين للخط</span>
+    </div>
+  </div>
+</body>
+</html>
