@@ -5,16 +5,18 @@
   <title>Route Map</title>
 
   <!-- External CSS -->
-  <link
-    rel="stylesheet"
-    href="https://yrhhdstnolguxmesxnnv.supabase.co/storage/v1/object/public/maps/style.css"
-  />
+  <link rel="stylesheet"
+        href="https://yrhhdstnolguxmesxnnv.supabase.co/storage/v1/object/public/maps/style.css" />
 
   <!-- Google Maps API -->
-  <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCYaJ4Gjq36mq8swYgjNXOYr5mKZi45niA"></script>
+  <script async defer
+          src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCYaJ4Gjq36mq8swYgjNXOYr5mKZi45niA">
+  </script>
 
   <!-- External JS (initMap + setRouteData) -->
-  <script src="https://yrhhdstnolguxmesxnnv.supabase.co/storage/v1/object/public/maps/map_script.js" defer></script>
+  <script src="https://yrhhdstnolguxmesxnnv.supabase.co/storage/v1/object/public/maps/map_script.js"
+          defer>
+  </script>
 
   <!-- URL Parameter Reader -->
   <script>
@@ -24,15 +26,21 @@
       const routeData = params.get("routeData") || "[]";
       const availableData = params.get("availableData") || "[]";
 
-      if (window.setRouteData && window.initMap) {
-        window.setRouteData(routeData, availableData);
-      } else {
-        setTimeout(readParamsAndSend, 150);
-      }
+      window.setRouteData(routeData, availableData);
     }
 
-    window.onload = readParamsAndSend;
+    window.onload = () => {
+      function waitForInit() {
+        if (window.initMap && window.setRouteData) {
+          readParamsAndSend();
+        } else {
+          setTimeout(waitForInit, 100);
+        }
+      }
+      waitForInit();
+    };
   </script>
+
 </head>
 
 <body>
