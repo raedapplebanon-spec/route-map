@@ -4,41 +4,39 @@
   <meta charset="UTF-8" />
   <title>Route Map</title>
 
-  <!-- External CSS -->
+  <!-- External CSS (GitHub Pages) -->
   <link rel="stylesheet"
-        href="https://yrhhdstnolguxmesxnnv.supabase.co/storage/v1/object/public/maps/style.css" />
+        href="https://raedapplebanon-spec.github.io/route-map/style.css" />
 
   <!-- Google Maps API -->
-  <script async defer
-          src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCYaJ4Gjq36mq8swYgjNXOYr5mKZi45niA">
+  <script
+    src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCYaJ4Gjq36mq8swYgjNXOYr5mKZi45niA&callback=initMap"
+    async defer>
   </script>
 
-  <!-- External JS (initMap + setRouteData) -->
-  <script src="https://yrhhdstnolguxmesxnnv.supabase.co/storage/v1/object/public/maps/map_script.js"
-          defer>
-  </script>
+  <!-- External JS (GitHub Pages) -->
+  <script src="https://raedapplebanon-spec.github.io/route-map/map_script.js" defer></script>
 
   <!-- URL Parameter Reader -->
   <script>
-    function readParamsAndSend() {
+    function sendParamsToMap() {
       const params = new URLSearchParams(window.location.search);
 
       const routeData = params.get("routeData") || "[]";
       const availableData = params.get("availableData") || "[]";
 
-      window.setRouteData(routeData, availableData);
-    }
-
-    window.onload = () => {
-      function waitForInit() {
-        if (window.initMap && window.setRouteData) {
-          readParamsAndSend();
+      function trySend() {
+        if (window.setRouteData) {
+          window.setRouteData(routeData, availableData);
         } else {
-          setTimeout(waitForInit, 100);
+          setTimeout(trySend, 120);
         }
       }
-      waitForInit();
-    };
+
+      trySend();
+    }
+
+    window.onload = sendParamsToMap;
   </script>
 
 </head>
@@ -51,18 +49,22 @@
       <div class="legend-color" style="background:#00c853"></div>
       <span>البداية</span>
     </div>
+
     <div class="legend-row">
       <div class="legend-color" style="background:#d50000"></div>
       <span>النهاية</span>
     </div>
+
     <div class="legend-row">
       <div class="legend-color" style="background:#1a73e8"></div>
       <span>محطات داخل الخط</span>
     </div>
+
     <div class="legend-row">
       <div class="legend-color" style="background:#ff9100"></div>
       <span>طلاب غير مضافين للخط</span>
     </div>
   </div>
+
 </body>
 </html>
