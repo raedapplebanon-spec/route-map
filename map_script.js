@@ -103,22 +103,37 @@ function setRouteData(routeArray, availableArray) {
     return marker;
   };
 
+  // 1. Draw Route Markers (Blue/Green/Red)
   routeArray.forEach((s) => {
+    // 🛑 Skip drawing the marker if the filter says hide it
+    if (s.hideMarker === true) return; 
+
     const pos = { lat: parseFloat(s.lat), lng: parseFloat(s.lng) };
     bounds.extend(pos);
+    
     let color = s.isStart ? "#00c853" : (s.isFinal ? "#d50000" : "#1a73e8");
     const html = `<div style="color:black; padding:5px; text-align:right; direction:rtl;"><strong>${s.label || "محطة"}</strong></div>`;
+    
     routeMarkers.push(addMarker(pos, s.label, html, color));
   });
 
+  // 2. Draw Available Markers (Orange)
   availableArray.forEach((s) => {
+    // 🛑 Skip drawing if hidden
+    if (s.hideMarker === true) return;
+
     const pos = { lat: parseFloat(s.lat), lng: parseFloat(s.lng) };
     bounds.extend(pos);
+    
     const html = `<div style="color:black; padding:5px; text-align:right; direction:rtl;">👨‍🎓 <strong>${s.studentName}</strong><br>الصف: ${s.gradeName}<br>الشعبة: ${s.sectionName}</div>`;
+    
     availableMarkers.push(addMarker(pos, s.studentName, html, "#ff9100"));
   });
 
+  // 3. Always calculate route based on the FULL array 
+  // (the line stays even if markers are hidden)
   if (routeArray.length >= 2) calculateRoadRoute(routeArray);
+  
   if (routeArray.length + availableArray.length > 0) map.fitBounds(bounds);
 }
 
@@ -185,3 +200,4 @@ function calculateRoadRoute(allStops) {
 
 window.initMap = initMap;
 window.setRouteData = setRouteData;
+
