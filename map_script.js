@@ -3,9 +3,12 @@ let routeMarkers = [];
 let availableMarkers = [];
 let routePolyline = null;
 
-let mapReady = false;          // Map initialized
-let pendingRouteData = null;   // Buffer for early data
+let mapReady = false;
+let pendingRouteData = null;
 
+// ---------------------------------------------------------
+// Initialize Google Map
+// ---------------------------------------------------------
 function initMap() {
   const defaultCenter = { lat: 32.028031, lng: 35.704308 };
 
@@ -16,21 +19,25 @@ function initMap() {
 
   mapReady = true;
 
-  // If data was sent before Google Maps finished loading
+  // Apply pending data if sent before map was ready
   if (pendingRouteData) {
     setRouteData(pendingRouteData.route, pendingRouteData.available);
     pendingRouteData = null;
   }
 }
 
-function setRouteData(routeJson, availableJson) {
-  // Map not ready yet → save & retry after init
+// ---------------------------------------------------------
+// Receive assigned + available markers (ARRAYS, not strings)
+// ---------------------------------------------------------
+function setRouteData(routeArray, availableArray) {
   if (!mapReady) {
-    pendingRouteData = { route: routeJson, available: availableJson };
+    pendingRouteData = { route: routeArray, available: availableArray };
     return;
   }
 
+  // ---------------------------------------------------------
   // Clear old markers
+  // ---------------------------------------------------------
   routeMarkers.forEach((m) => m.setMap(null));
   availableMarkers.forEach((m) => m.setMap(null));
   routeMarkers = [];
@@ -41,22 +48,23 @@ function setRouteData(routeJson, availableJson) {
     routePolyline = null;
   }
 
-  const routeStops = JSON.parse(routeJson || "[]");
-  const availableStudents = JSON.parse(availableJson || "[]");
+  const routeStops = Array.isArray(routeArray) ? routeArray : [];
+  const availableStudents = Array.isArray(availableArray) ? availableArray : [];
 
   const bounds = new google.maps.LatLngBounds();
-
-  // Route markers
   const routePath = [];
 
+  // ---------------------------------------------------------
+  // Route markers
+  // ---------------------------------------------------------
   routeStops.forEach((s) => {
     const pos = { lat: s.lat, lng: s.lng };
     bounds.extend(pos);
     routePath.push(pos);
 
-    let iconUrl = "http://maps.google.com/mapfiles/ms/icons/blue-dot.png";
-    if (s.isStart) iconUrl = "http://maps.google.com/mapfiles/ms/icons/green-dot.png";
-    else if (s.isFinal) iconUrl = "http://maps.google.com/mapfiles/ms/icons/red-dot.png";
+    let iconUrl = "https://maps.google.com/mapfiles/ms/icons/blue-dot.png";
+    if (s.isStart) iconUrl = "https://maps.google.com/mapfiles/ms/icons/green-dot.png";
+    else if (s.isFinal) iconUrl = "https://maps.google.com/mapfiles/ms/icons/red-dot.png";
 
     const marker = new google.maps.Marker({
       position: pos,
@@ -75,7 +83,9 @@ function setRouteData(routeJson, availableJson) {
     routeMarkers.push(marker);
   });
 
-  // Draw Polyline
+  // ---------------------------------------------------------
+  // Draw polyline for route
+  // ---------------------------------------------------------
   if (routePath.length >= 2) {
     routePolyline = new google.maps.Polyline({
       path: routePath,
@@ -87,7 +97,9 @@ function setRouteData(routeJson, availableJson) {
     routePolyline.setMap(map);
   }
 
+  // ---------------------------------------------------------
   // Available students markers
+  // ---------------------------------------------------------
   availableStudents.forEach((s) => {
     const pos = { lat: s.lat, lng: s.lng };
     bounds.extend(pos);
@@ -96,7 +108,7 @@ function setRouteData(routeJson, availableJson) {
       position: pos,
       map,
       title: `${s.studentName || "طالب"} - ${s.gradeName || ""}/${s.sectionName || ""}`,
-      icon: "http://maps.google.com/mapfiles/ms/icons/orange-dot.png",
+      icon: "https://maps.google.com/mapfiles/ms/icons/orange-dot.png",
     });
 
     const info = new google.maps.InfoWindow({
@@ -111,8 +123,10 @@ function setRouteData(routeJson, availableJson) {
     availableMarkers.push(marker);
   });
 
-  // Fit map
-  if (routeStops.length > 0 || availableStudents.length > 0) {
+  // ---------------------------------------------------------
+  // Fit map to markers
+  // ---------------------------------------------------------
+  if (routeStops.length + availableStudents.length > 0) {
     map.fitBounds(bounds);
   } else {
     map.setCenter({ lat: 32.028031, lng: 35.704308 });
