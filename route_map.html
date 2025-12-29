@@ -14,21 +14,24 @@
 
   <!-- FIXED HANDLER -->
   <script>
-    window.addEventListener("message", function (event) {
-      if (!event.data || event.data.action !== "setRouteData") {
-        return;
-      }
+  window.addEventListener("message", function (event) {
+    if (!event.data || event.data.action !== "setRouteData") {
+      return;
+    }
 
-      const assignedData = event.data.routeData || [];
-      const availableData = event.data.availableData || [];
+    const routeData = event.data.routeData || [];
+    const availableData = event.data.availableData || [];
 
-      if (window.setRouteData) {
-        window.setRouteData(assignedData, availableData);
-      } else {
-        console.warn("setRouteData() is not ready yet");
-      }
-    });
-  </script>
+    console.log("📩 Received from Flutter:", routeData, availableData);
+
+    if (window.setRouteData) {
+      window.setRouteData(routeData, availableData);
+    } else {
+      console.warn("setRouteData() is not ready yet");
+    }
+  });
+</script>
+
 </head>
 
 <body>
@@ -54,3 +57,4 @@
   </div>
 </body>
 </html>
+
