@@ -1,5 +1,5 @@
 let map;
-let routeMarkers = []; // Will store { marker, lat, lng } objects
+let routeMarkers = []; 
 let availableMarkers = [];
 let directionsService;
 let directionsRenderer;
@@ -8,9 +8,6 @@ let pendingData = null;
 
 const MY_MAP_ID = "48c2bb983bd19c1c44d95cb7";
 
-/**
- * ⭐ Distance + Clustering Helpers
- */
 function haversineDistance(lat1, lng1, lat2, lng2) {
   const R = 6371e3;
   const toRad = x => x * Math.PI / 180;
@@ -82,9 +79,6 @@ async function initMap() {
   }
 }
 
-/**
- * 3. Process Data
- */
 function setRouteData(routeArray, availableArray) {
   if (!mapReady) {
     pendingData = { route: routeArray, available: availableArray };
@@ -129,31 +123,26 @@ function setRouteData(routeArray, availableArray) {
   const routeClusters = groupCloseLocations(routeArray);
   const availableClusters = groupCloseLocations(availableArray);
 
-  // --- Route Markers ---
   routeClusters.forEach(cluster => {
     if (cluster.hideMarker === true) return;
-
     const pos = { lat: cluster.lat, lng: cluster.lng };
     bounds.extend(pos);
 
     let color = cluster.isStart ? "#00c853" : (cluster.isFinal ? "#d50000" : "#1a73e8");
     let initialGlyph = cluster.isStart ? "S" : (cluster.isFinal ? "E" : "...");
 
-    let html = `<div style="color:black;text-align:right;direction:rtl;min-width:150px;">`;
-    html += `<b style="color:${color};">محطة توقف</b><hr style="margin:5px 0;">`;
+    let html = `<div id="info-${cluster.lat}-${cluster.lng}" style="color:black;text-align:right;direction:rtl;min-width:150px;">`;
+    html += `<b class="stop-title" style="color:${color};">محطة توقف</b><hr style="margin:5px 0;">`;
     cluster.items.forEach(x => { 
-      // ⭐ FIX: Show student names instead of generic label
       let name = x.studentName || x.label || "طالب";
       html += `<div style="margin-bottom:4px;">• <b>${name}</b></div>`; 
     });
     html += `</div>`;
 
     const markerObj = addMarker(pos, "route", html, color, initialGlyph);
-    // Store extra data to update the number later
-    routeMarkers.push({ ...markerObj, lat: cluster.lat, lng: cluster.lng, isStart: cluster.isStart, isFinal: cluster.isFinal });
+    routeMarkers.push({ ...markerObj, lat: cluster.lat, lng: cluster.lng });
   });
 
-  // --- Available Markers ---
   availableClusters.forEach(cluster => {
     if (cluster.hideMarker === true) return;
     const pos = { lat: cluster.lat, lng: cluster.lng };
@@ -175,9 +164,6 @@ function setRouteData(routeArray, availableArray) {
   if (!bounds.isEmpty()) map.fitBounds(bounds);
 }
 
-/**
- * 4. Road Route Logic (With Order Sync)
- */
 function calculateRoadRoute(clusters) {
   const startStop = clusters.find(c => c.isStart);
   const endStop = clusters.find(c => c.isFinal);
@@ -195,14 +181,21 @@ function calculateRoadRoute(clusters) {
     if (status === "OK") {
       directionsRenderer.setDirections(result);
       
-      // ⭐ THE FIX: Update numbers based on Google's optimized order
       const optimizedOrder = result.routes[0].waypoint_order; 
       optimizedOrder.forEach((originalIndex, stepIndex) => {
         const clusterData = waypointClusters[originalIndex];
-        // Find the marker we drew for this specific location
-        const markerObj = routeMarkers.find(m => m.lat === clusterData.lat && m.lng === clusterData.lng);
+        const stopNum = (stepIndex + 1).toString();
+
+        // Use a tiny epsilon (0.0001) to find the marker even if coordinates shifted slightly
+        const markerObj = routeMarkers.find(m => 
+          Math.abs(m.lat - clusterData.lat) < 0.0001 && 
+          Math.abs(m.lng - clusterData.lng) < 0.0001
+        );
+
         if (markerObj) {
-          markerObj.pin.glyph = (stepIndex + 1).toString(); // Set to 1, 2, 3...
+          markerObj.pin.glyph = stopNum;
+          // Also update the title in the HTML if infoWindow opens
+          markerObj.marker.title = "محطة رقم " + stopNum;
         }
       });
 
