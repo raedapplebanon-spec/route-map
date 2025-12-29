@@ -117,29 +117,42 @@ function setRouteData(routeArray, availableArray) {
   if (routeArray.length + availableArray.length > 0) map.fitBounds(bounds);
 }
 
-function calculateRoadRoute(stops) {
-  // 1️⃣ DEFINE FIXED START + END
+function calculateRoadRoute(allStops) {
+
+  // 1️⃣ FILTER: only stops used in the route
+  const stops = allStops.filter(s =>
+    s.isStart === true ||
+    s.isFinal === true ||
+    s.isAvailable === false   // students inside the route
+  );
+
+  // Must have at least start + end
+  if (stops.length < 2) return;
+
+  // 2️⃣ IDENTIFY FIXED START + END
   const start = stops.find(s => s.isStart === true);
-  const end = stops.find(s => s.isFinal === true);
+  const end   = stops.find(s => s.isFinal === true);
 
   if (!start || !end) return;
 
-  // 2️⃣ WAYPOINTS (students only)
+  // 3️⃣ WAYPOINTS (students only)
   const waypoints = stops
-    .filter(s => !s.isStart && !s.isFinal)
+    .filter(s => !s.isStart && !s.isFinal)  // exclude start/end
     .map(s => ({
       location: { lat: s.lat, lng: s.lng },
       stopover: true,
     }));
 
-  // 3️⃣ ASK GOOGLE FOR OPTIMIZED ROUTE
+  // 4️⃣ ASK GOOGLE FOR OPTIMIZED ROUTE
   directionsService.route(
     {
       origin: { lat: start.lat, lng: start.lng },
       destination: { lat: end.lat, lng: end.lng },
       waypoints: waypoints,
       travelMode: google.maps.TravelMode.DRIVING,
-      optimizeWaypoints: true,  // ⭐ SUPER POWER
+
+      // ⭐ Makes Google choose best path automatically
+      optimizeWaypoints: true,
     },
     (result, status) => {
       if (status === "OK") {
@@ -151,3 +164,4 @@ function calculateRoadRoute(stops) {
 
 window.initMap = initMap;
 window.setRouteData = setRouteData;
+
