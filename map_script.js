@@ -1,11 +1,16 @@
 let map;
 let routeMarkers = [];
 let availableMarkers = [];
-let routePolyline = null;
+
+let directionsService;
+let directionsRenderer;
 
 let mapReady = false;
 let pendingRouteData = null;
 
+// ---------------------------------------------------------
+// Initialize Google Map
+// ---------------------------------------------------------
 function initMap() {
   const defaultCenter = { lat: 32.028031, lng: 35.704308 };
 
@@ -14,32 +19,46 @@ function initMap() {
     zoom: 13,
   });
 
+  // Directions API
+  directionsService = new google.maps.DirectionsService();
+  directionsRenderer = new google.maps.DirectionsRenderer({
+    map: map,
+    suppressMarkers: true, // keep your own markers
+    polylineOptions: {
+      strokeColor: "#1a73e8",
+      strokeOpacity: 0.9,
+      strokeWeight: 4,
+    },
+  });
+
   mapReady = true;
 
-  // If we got data before map was ready
+  // Apply stored data if iframe sent it before map was ready
   if (pendingRouteData) {
     setRouteData(pendingRouteData.route, pendingRouteData.available);
     pendingRouteData = null;
   }
 }
 
-// routeArray & availableArray are ARRAYS now
+// ---------------------------------------------------------
+// Receive Route + Available arrays (NOT JSON strings)
+// ---------------------------------------------------------
 function setRouteData(routeArray, availableArray) {
   if (!mapReady) {
     pendingRouteData = { route: routeArray, available: availableArray };
     return;
   }
 
+  // ----------------------------------------
   // Clear old markers
+  // ----------------------------------------
   routeMarkers.forEach((m) => m.setMap(null));
   availableMarkers.forEach((m) => m.setMap(null));
   routeMarkers = [];
   availableMarkers = [];
 
-  if (routePolyline) {
-    routePolyline.setMap(null);
-    routePolyline = null;
-  }
+  // Clear old route
+  directionsRenderer.setDirections({ routes: [] });
 
   const routeStops = Array.isArray(routeArray) ? routeArray : [];
   const availableStudents = Array.isArray(availableArray) ? availableArray : [];
@@ -47,7 +66,9 @@ function setRouteData(routeArray, availableArray) {
   const bounds = new google.maps.LatLngBounds();
   const routePath = [];
 
-  // Route markers
+  // ----------------------------------------
+  // Add route markers
+  // ----------------------------------------
   routeStops.forEach((s) => {
     const pos = { lat: s.lat, lng: s.lng };
     bounds.extend(pos);
@@ -66,27 +87,48 @@ function setRouteData(routeArray, availableArray) {
 
     const info = new google.maps.InfoWindow({
       content: `<div style="font-size:13px;direction:rtl;text-align:right">
-                  ${s.label || "نقطة"}
-                </div>`
+        ${s.label || "نقطة"}
+      </div>`
     });
 
     marker.addListener("click", () => info.open(map, marker));
     routeMarkers.push(marker);
   });
 
-  // Polyline
+  // ----------------------------------------
+  // Draw REAL DRIVING ROUTE using Directions API
+  // ----------------------------------------
   if (routePath.length >= 2) {
-    routePolyline = new google.maps.Polyline({
-      path: routePath,
-      geodesic: true,
-      strokeColor: "#1a73e8",
-      strokeOpacity: 0.9,
-      strokeWeight: 3,
-    });
-    routePolyline.setMap(map);
+    const origin = routePath[0];
+    const destination = routePath[routePath.length - 1];
+
+    // Create waypoints for all middle stops
+    const waypoints = routePath.slice(1, -1).map((p) => ({
+      location: p,
+      stopover: true,
+    }));
+
+    directionsService.route(
+      {
+        origin,
+        destination,
+        waypoints,
+        optimizeWaypoints: false,
+        travelMode: google.maps.TravelMode.DRIVING,
+      },
+      (result, status) => {
+        if (status === google.maps.DirectionsStatus.OK) {
+          directionsRenderer.setDirections(result);
+        } else {
+          console.error("❌ Directions failed:", status);
+        }
+      }
+    );
   }
 
+  // ----------------------------------------
   // Available markers
+  // ----------------------------------------
   availableStudents.forEach((s) => {
     const pos = { lat: s.lat, lng: s.lng };
     bounds.extend(pos);
@@ -100,18 +142,19 @@ function setRouteData(routeArray, availableArray) {
 
     const info = new google.maps.InfoWindow({
       content: `<div style="font-size:13px;direction:rtl;text-align:right">
-                  👨‍🎓 ${s.studentName || ""}
-                  <br>
-                  📚 ${s.gradeName || ""} - ${s.sectionName || ""}
-                </div>`
+        👨‍🎓 ${s.studentName || ""}<br>
+        📚 ${s.gradeName || ""} - ${s.sectionName || ""}
+      </div>`
     });
 
     marker.addListener("click", () => info.open(map, marker));
     availableMarkers.push(marker);
   });
 
-  // Fit map
-  if (routeStops.length + availableStudents.length > 0) {
+  // ----------------------------------------
+  // Fit map to all markers
+  // ----------------------------------------
+  if (routeStops.length > 0 || availableStudents.length > 0) {
     map.fitBounds(bounds);
   } else {
     map.setCenter({ lat: 32.028031, lng: 35.704308 });
