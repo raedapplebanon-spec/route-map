@@ -1,4 +1,4 @@
- map;
+map;
 let routeMarkers = [];
 let availableMarkers = [];
 let routePolyline = null;
