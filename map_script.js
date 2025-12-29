@@ -1,4 +1,4 @@
-let map;
+ map;
 let routeMarkers = [];
 let availableMarkers = [];
 let routePolyline = null;
@@ -6,9 +6,6 @@ let routePolyline = null;
 let mapReady = false;
 let pendingRouteData = null;
 
-// ---------------------------------------------------------
-// Initialize Google Map
-// ---------------------------------------------------------
 function initMap() {
   const defaultCenter = { lat: 32.028031, lng: 35.704308 };
 
@@ -19,76 +16,21 @@ function initMap() {
 
   mapReady = true;
 
+  // If we got data before map was ready
   if (pendingRouteData) {
     setRouteData(pendingRouteData.route, pendingRouteData.available);
     pendingRouteData = null;
   }
 }
 
-// ---------------------------------------------------------
-// Draw Polyline from encoded polyline
-// ---------------------------------------------------------
-function drawPolyline(encoded) {
-  if (routePolyline) {
-    routePolyline.setMap(null);
-  }
-
-  const path = google.maps.geometry.encoding.decodePath(encoded);
-
-  routePolyline = new google.maps.Polyline({
-    path,
-    strokeColor: "#1a73e8",
-    strokeOpacity: 0.9,
-    strokeWeight: 4,
-    map,
-  });
-}
-
-// ---------------------------------------------------------
-// Call Supabase Edge Function (server-side routing)
-// ---------------------------------------------------------
-async function requestDrivingRoute(origin, destination, waypoints = []) {
-  const response = await fetch(
-    "https://yrhhdstnolguxmesxnnv.supabase.co/functions/v1/get_route",
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-client-info": "transport-web"   // ✅ REQUIRED FIX
-      },
-      body: JSON.stringify({
-        origin: { latitude: origin.lat, longitude: origin.lng },
-        destination: { latitude: destination.lat, longitude: destination.lng },
-        waypoints: waypoints.map((p) => ({
-          latitude: p.lat,
-          longitude: p.lng,
-        })),
-      }),
-    }
-  );
-
-  const data = await response.json();
-
-  if (!data.routes || data.routes.length === 0) {
-    console.error("❌ No route returned:", data);
-    return;
-  }
-
-  const encoded = data.routes[0].polyline.encodedPolyline;
-  drawPolyline(encoded);
-}
-
-
-// ---------------------------------------------------------
-// Update map with new stops
-// ---------------------------------------------------------
+// routeArray & availableArray are ARRAYS now
 function setRouteData(routeArray, availableArray) {
   if (!mapReady) {
     pendingRouteData = { route: routeArray, available: availableArray };
     return;
   }
 
-  // Clear markers
+  // Clear old markers
   routeMarkers.forEach((m) => m.setMap(null));
   availableMarkers.forEach((m) => m.setMap(null));
   routeMarkers = [];
@@ -99,55 +41,83 @@ function setRouteData(routeArray, availableArray) {
     routePolyline = null;
   }
 
+  const routeStops = Array.isArray(routeArray) ? routeArray : [];
+  const availableStudents = Array.isArray(availableArray) ? availableArray : [];
+
   const bounds = new google.maps.LatLngBounds();
   const routePath = [];
 
   // Route markers
-  routeArray.forEach((s) => {
+  routeStops.forEach((s) => {
     const pos = { lat: s.lat, lng: s.lng };
     bounds.extend(pos);
     routePath.push(pos);
 
-    let icon = "https://maps.google.com/mapfiles/ms/icons/blue-dot.png";
-    if (s.isStart) icon = "https://maps.google.com/mapfiles/ms/icons/green-dot.png";
-    else if (s.isFinal) icon = "https://maps.google.com/mapfiles/ms/icons/red-dot.png";
+    let iconUrl = "https://maps.google.com/mapfiles/ms/icons/blue-dot.png";
+    if (s.isStart) iconUrl = "https://maps.google.com/mapfiles/ms/icons/green-dot.png";
+    else if (s.isFinal) iconUrl = "https://maps.google.com/mapfiles/ms/icons/red-dot.png";
 
     const marker = new google.maps.Marker({
       position: pos,
       map,
-      icon,
       title: s.label || "",
+      icon: iconUrl,
     });
 
+    const info = new google.maps.InfoWindow({
+      content: <div style="font-size:13px;direction:rtl;text-align:right">
+                  ${s.label || "نقطة"}
+                </div>
+    });
+
+    marker.addListener("click", () => info.open(map, marker));
     routeMarkers.push(marker);
   });
 
-  // Call routing if at least two points
+  // Polyline
   if (routePath.length >= 2) {
-    const origin = routePath[0];
-    const destination = routePath[routePath.length - 1];
-    const waypoints = routePath.slice(1, -1);
-
-    requestDrivingRoute(origin, destination, waypoints);
+    routePolyline = new google.maps.Polyline({
+      path: routePath,
+      geodesic: true,
+      strokeColor: "#1a73e8",
+      strokeOpacity: 0.9,
+      strokeWeight: 3,
+    });
+    routePolyline.setMap(map);
   }
 
   // Available markers
-  availableArray.forEach((s) => {
+  availableStudents.forEach((s) => {
     const pos = { lat: s.lat, lng: s.lng };
     bounds.extend(pos);
 
     const marker = new google.maps.Marker({
       position: pos,
       map,
+      title: ${s.studentName || "طالب"} - ${s.gradeName || ""}/${s.sectionName || ""},
       icon: "https://maps.google.com/mapfiles/ms/icons/orange-dot.png",
     });
 
+    const info = new google.maps.InfoWindow({
+      content: <div style="font-size:13px;direction:rtl;text-align:right">
+                  👨‍🎓 ${s.studentName || ""}
+                  <br>
+                  📚 ${s.gradeName || ""} - ${s.sectionName || ""}
+                </div>
+    });
+
+    marker.addListener("click", () => info.open(map, marker));
     availableMarkers.push(marker);
   });
 
-  map.fitBounds(bounds);
+  // Fit map
+  if (routeStops.length + availableStudents.length > 0) {
+    map.fitBounds(bounds);
+  } else {
+    map.setCenter({ lat: 32.028031, lng: 35.704308 });
+    map.setZoom(13);
+  }
 }
 
 window.initMap = initMap;
 window.setRouteData = setRouteData;
-
