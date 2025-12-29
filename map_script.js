@@ -6,9 +6,6 @@ let routePolyline = null;
 let mapReady = false;
 let pendingRouteData = null;
 
-// ---------------------------------------------------------
-// Initialize Google Map
-// ---------------------------------------------------------
 function initMap() {
   const defaultCenter = { lat: 32.028031, lng: 35.704308 };
 
@@ -19,25 +16,21 @@ function initMap() {
 
   mapReady = true;
 
-  // Apply pending data if sent before map was ready
+  // If we got data before map was ready
   if (pendingRouteData) {
     setRouteData(pendingRouteData.route, pendingRouteData.available);
     pendingRouteData = null;
   }
 }
 
-// ---------------------------------------------------------
-// Receive assigned + available markers (ARRAYS, not strings)
-// ---------------------------------------------------------
+// routeArray & availableArray are ARRAYS now
 function setRouteData(routeArray, availableArray) {
   if (!mapReady) {
     pendingRouteData = { route: routeArray, available: availableArray };
     return;
   }
 
-  // ---------------------------------------------------------
   // Clear old markers
-  // ---------------------------------------------------------
   routeMarkers.forEach((m) => m.setMap(null));
   availableMarkers.forEach((m) => m.setMap(null));
   routeMarkers = [];
@@ -54,9 +47,7 @@ function setRouteData(routeArray, availableArray) {
   const bounds = new google.maps.LatLngBounds();
   const routePath = [];
 
-  // ---------------------------------------------------------
   // Route markers
-  // ---------------------------------------------------------
   routeStops.forEach((s) => {
     const pos = { lat: s.lat, lng: s.lng };
     bounds.extend(pos);
@@ -83,9 +74,7 @@ function setRouteData(routeArray, availableArray) {
     routeMarkers.push(marker);
   });
 
-  // ---------------------------------------------------------
-  // Draw polyline for route
-  // ---------------------------------------------------------
+  // Polyline
   if (routePath.length >= 2) {
     routePolyline = new google.maps.Polyline({
       path: routePath,
@@ -97,9 +86,7 @@ function setRouteData(routeArray, availableArray) {
     routePolyline.setMap(map);
   }
 
-  // ---------------------------------------------------------
-  // Available students markers
-  // ---------------------------------------------------------
+  // Available markers
   availableStudents.forEach((s) => {
     const pos = { lat: s.lat, lng: s.lng };
     bounds.extend(pos);
@@ -123,9 +110,7 @@ function setRouteData(routeArray, availableArray) {
     availableMarkers.push(marker);
   });
 
-  // ---------------------------------------------------------
-  // Fit map to markers
-  // ---------------------------------------------------------
+  // Fit map
   if (routeStops.length + availableStudents.length > 0) {
     map.fitBounds(bounds);
   } else {
