@@ -4,31 +4,26 @@
   <meta charset="UTF-8" />
   <title>Route Map</title>
 
-  <!-- External CSS (GitHub Pages) -->
-  <link rel="stylesheet"
-        href="https://raedapplebanon-spec.github.io/route-map/style.css?v=3" />
-
-  <!-- Load map_script.js FIRST so initMap() + setRouteData() exist -->
+  <link rel="stylesheet" href="https://raedapplebanon-spec.github.io/route-map/style.css?v=3" />
   <script src="https://raedapplebanon-spec.github.io/route-map/map_script.js?v=3"></script>
 
-  <!-- Google Maps API calls initMap() after loading -->
   <script
     src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCYaJ4Gjq36mq8swYgjNXOYr5mKZi45niA&callback=initMap"
     async defer>
   </script>
 
-  <!-- 🔁 Listen for messages from Flutter (postMessage) -->
+  <!-- FIXED HANDLER -->
   <script>
     window.addEventListener("message", function (event) {
       if (!event.data || event.data.action !== "setRouteData") {
         return;
       }
 
-      const routeJson = event.data.routeData || "[]";
-      const availableJson = event.data.availableData || "[]";
+      const assignedData = event.data.routeData || [];
+      const availableData = event.data.availableData || [];
 
       if (window.setRouteData) {
-        window.setRouteData(routeJson, availableJson);
+        window.setRouteData(assignedData, availableData);
       } else {
         console.warn("setRouteData() is not ready yet");
       }
