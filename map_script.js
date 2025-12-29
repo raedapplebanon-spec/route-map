@@ -117,23 +117,43 @@ function setRouteData(routeArray, availableArray) {
 }
 
 function calculateRoadRoute(stops) {
-  const origin = { lat: stops[0].lat, lng: stops[0].lng };
-  const destination = { lat: stops[stops.length - 1].lat, lng: stops[stops.length - 1].lng };
-  const waypoints = stops.slice(1, -1).map(s => ({
-    location: { lat: s.lat, lng: s.lng },
-    stopover: true
-  }));
 
-  directionsService.route({
-    origin: origin,
-    destination: destination,
-    waypoints: waypoints,
-    travelMode: google.maps.TravelMode.DRIVING,
-    optimizeWaypoints: false,
-  }, (result, status) => {
-    if (status === "OK") directionsRenderer.setDirections(result);
-  });
+  // 1️⃣ نحدد البداية (isStart)
+  const start = stops.find(s => s.isStart === true);
+
+  // 2️⃣ نحدد النهاية (isFinal)
+  const end = stops.find(s => s.isFinal === true);
+
+  // ⚠️ إذا لا يوجد بداية أو نهاية → لا نرسم أي خط
+  if (!start || !end) return;
+
+  // 3️⃣ كل الباقي → نقاط مرور
+  const waypoints = stops
+    .filter(s => !s.isStart && !s.isFinal)
+    .map(s => ({
+      location: { lat: s.lat, lng: s.lng },
+      stopover: true,
+    }));
+
+  // 4️⃣ نطلب المسار من Google
+  directionsService.route(
+    {
+      origin: { lat: start.lat, lng: start.lng },
+      destination: { lat: end.lat, lng: end.lng },
+      waypoints: waypoints,
+      travelMode: google.maps.TravelMode.DRIVING,
+
+      // ⚠️ Google يرتّب الطلاب حسب الموقع تلقائياً
+      optimizeWaypoints: true,
+    },
+    (result, status) => {
+      if (status === "OK") {
+        directionsRenderer.setDirections(result);
+      }
+    }
+  );
 }
 
 window.initMap = initMap;
 window.setRouteData = setRouteData;
+
