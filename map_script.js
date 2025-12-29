@@ -39,7 +39,8 @@ function groupCloseLocations(stops, tolerance = 5) {
         items: [stop],
         isStart: stop.isStart === true,
         isFinal: stop.isFinal === true,
-        hideMarker: stop.hideMarker === true || stop.hideMarker === 'true'
+        // ⭐ STRICT FIX: Ensure hideMarker is treated as a boolean
+        hideMarker: (stop.hideMarker === true || stop.hideMarker === 'true')
       });
     }
   });
@@ -97,6 +98,7 @@ function setRouteData(routeArray, availableArray) {
     return;
   }
 
+  // Clear existing markers
   routeMarkers.forEach(m => m.map = null);
   availableMarkers.forEach(m => m.map = null);
   routeMarkers = [];
@@ -109,13 +111,12 @@ function setRouteData(routeArray, availableArray) {
   const bounds = new google.maps.LatLngBounds();
   const infoWindow = new google.maps.InfoWindow();
 
-  // ⭐ Updated addMarker to handle glyph text (The Count)
   const addMarker = (pos, title, html, color, glyphText) => {
     const pin = new google.maps.marker.PinElement({
       background: color,
       borderColor: "#FFFFFF",
       glyphColor: "#FFFFFF",
-      glyph: glyphText // This shows the number inside the pin
+      glyph: glyphText
     });
 
     const marker = new google.maps.marker.AdvancedMarkerElement({
@@ -136,18 +137,18 @@ function setRouteData(routeArray, availableArray) {
   const routeClusters = groupCloseLocations(routeArray);
   const availableClusters = groupCloseLocations(availableArray);
 
-  // --- Route Markers ---
+  // --- Route Markers (Blue) ---
   routeClusters.forEach(cluster => {
-    if (cluster.hideMarker) return;
+    // If Flutter says hide assigned markers, skip this cluster
+    if (cluster.hideMarker === true) return;
 
     const pos = { lat: cluster.lat, lng: cluster.lng };
     bounds.extend(pos);
 
-    const isStart = cluster.items.some(x => x.isStart);
-    const isFinal = cluster.items.some(x => x.isFinal);
+    const isStart = cluster.isStart;
+    const isFinal = cluster.isFinal;
     let color = isStart ? "#00c853" : (isFinal ? "#d50000" : "#1a73e8");
     
-    // Logic for glyph: Show 'S' for start, 'E' for end, or the count for stops
     let glyphText = cluster.items.length.toString();
     if (isStart) glyphText = "S";
     else if (isFinal) glyphText = "E";
@@ -162,9 +163,10 @@ function setRouteData(routeArray, availableArray) {
     routeMarkers.push(addMarker(pos, "route", html, color, glyphText));
   });
 
-  // --- Available Markers ---
+  // --- Available Markers (Orange) ---
   availableClusters.forEach(cluster => {
-    if (cluster.hideMarker) return;
+    // ⭐ THIS IS THE FILTER FIX: Skip if hideMarker is true
+    if (cluster.hideMarker === true) return;
 
     const pos = { lat: cluster.lat, lng: cluster.lng };
     bounds.extend(pos);
@@ -181,6 +183,7 @@ function setRouteData(routeArray, availableArray) {
     availableMarkers.push(addMarker(pos, "available", html, "#ff9100", glyphText));
   });
 
+  // Always calculate the line based on the trip clusters
   if (routeClusters.length >= 2) {
     calculateRoadRoute(routeClusters);
   }
@@ -192,13 +195,13 @@ function setRouteData(routeArray, availableArray) {
  * 4. Road Route Logic
  */
 function calculateRoadRoute(clusters) {
-  const startStop = clusters.find(c => c.items.some(x => x.isStart));
-  const endStop = clusters.find(c => c.items.some(x => x.isFinal));
+  const startStop = clusters.find(c => c.isStart);
+  const endStop = clusters.find(c => c.isFinal);
 
   if (!startStop || !endStop) return;
 
   const waypoints = clusters
-    .filter(c => c !== startStop && c !== endStop)
+    .filter(c => !c.isStart && !c.isFinal)
     .map(c => ({
       location: { lat: c.lat, lng: c.lng },
       stopover: true,
