@@ -119,44 +119,54 @@ function setRouteData(routeArray, availableArray) {
 
 function calculateRoadRoute(allStops) {
 
-  // 1️⃣ FILTER: only stops used in the route
   const stops = allStops.filter(s =>
     s.isStart === true ||
     s.isFinal === true ||
-    s.isAvailable === false   // students inside the route
+    s.isAvailable === false
   );
 
-  // Must have at least start + end
   if (stops.length < 2) return;
 
-  // 2️⃣ IDENTIFY FIXED START + END
-  const start = stops.find(s => s.isStart === true);
-  const end   = stops.find(s => s.isFinal === true);
-
+  const start = stops.find(s => s.isStart);
+  const end = stops.find(s => s.isFinal);
   if (!start || !end) return;
 
-  // 3️⃣ WAYPOINTS (students only)
   const waypoints = stops
-    .filter(s => !s.isStart && !s.isFinal)  // exclude start/end
+    .filter(s => !s.isStart && !s.isFinal)
     .map(s => ({
       location: { lat: s.lat, lng: s.lng },
       stopover: true,
     }));
 
-  // 4️⃣ ASK GOOGLE FOR OPTIMIZED ROUTE
   directionsService.route(
     {
       origin: { lat: start.lat, lng: start.lng },
       destination: { lat: end.lat, lng: end.lng },
       waypoints: waypoints,
       travelMode: google.maps.TravelMode.DRIVING,
-
-      // ⭐ Makes Google choose best path automatically
       optimizeWaypoints: true,
     },
     (result, status) => {
       if (status === "OK") {
         directionsRenderer.setDirections(result);
+
+        // 1️⃣ GET SUMMARY
+        const route = result.routes[0];
+        const legs = route.legs;
+
+        let totalDistance = 0;
+        let totalDuration = 0;
+
+        legs.forEach(leg => {
+          totalDistance += leg.distance.value; // meters
+          totalDuration += leg.duration.value; // seconds
+        });
+
+        // Convert to km/minutes
+        const km = (totalDistance / 1000).toFixed(2);
+        const minutes = Math.round(totalDuration / 60);
+
+        updateRouteSummary(km, minutes);
       }
     }
   );
@@ -164,4 +174,5 @@ function calculateRoadRoute(allStops) {
 
 window.initMap = initMap;
 window.setRouteData = setRouteData;
+
 
