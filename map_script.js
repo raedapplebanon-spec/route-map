@@ -122,20 +122,20 @@ function setRouteData(routeArray, availableArray) {
   if (routeArray.length + availableArray.length > 0) map.fitBounds(bounds);
 }
 
-/**
- * 4. Original Route Logic (Restored)
- */
 function calculateRoadRoute(allStops) {
   const stops = allStops.filter(s =>
     s.isStart === true ||
     s.isFinal === true ||
-    s.isAvailable === false
+    s.isAvailable === false || s.isAvailable === 'false'
   );
+
+  console.log("Stops sent to Google:", stops.length); // Check this in your browser console!
 
   if (stops.length < 2) return;
 
-  const start = stops.find(s => s.isStart);
-  const end = stops.find(s => s.isFinal);
+  const start = stops.find(s => s.isStart === true);
+  const end = stops.find(s => s.isFinal === true);
+  
   if (!start || !end) return;
 
   const waypoints = stops
@@ -170,7 +170,11 @@ function calculateRoadRoute(allStops) {
         const km = (totalDistance / 1000).toFixed(1);
         const minutes = Math.round(totalDuration / 60);
 
-        updateRouteSummary(km, minutes);
+        if (typeof updateRouteSummary === "function") {
+          updateRouteSummary(km, minutes);
+        }
+      } else {
+        console.error("Route Error:", status);
       }
     }
   );
@@ -178,3 +182,4 @@ function calculateRoadRoute(allStops) {
 
 window.initMap = initMap;
 window.setRouteData = setRouteData;
+
