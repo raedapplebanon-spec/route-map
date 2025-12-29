@@ -7,20 +7,18 @@
   <link rel="stylesheet" href="https://raedapplebanon-spec.github.io/route-map/style.css?v=3" />
 
   <!-- Always bump this version when editing JS -->
-  <script src="https://raedapplebanon-spec.github.io/route-map/map_script.js?v=5"></script>
+  <script src="https://raedapplebanon-spec.github.io/route-map/map_script.js?v=6"></script>
 
-  <!-- ✅ NEW Google Maps loader (with Routes library enabled) -->
+  <!-- NEW Google Maps (Routes API + Geometry library) -->
   <script
-    src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCYaJ4Gjq36mq8swYgjNXOYr5mKZi45niA&callback=initMap&libraries=routes"
+    src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCYaJ4Gjq36mq8swYgjNXOYr5mKZi45niA&callback=initMap&libraries=routes,geometry"
     async defer>
   </script>
 
   <!-- Flutter -> JS message handler -->
   <script>
     window.addEventListener("message", function (event) {
-      if (!event.data || event.data.action !== "setRouteData") {
-        return;
-      }
+      if (!event.data || event.data.action !== "setRouteData") return;
 
       const routeData = event.data.routeData || [];
       const availableData = event.data.availableData || [];
