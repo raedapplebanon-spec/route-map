@@ -2,8 +2,9 @@ let map;
 let routeMarkers = [];
 let availableMarkers = [];
 let routePolyline = null;
-let mapReady = false;  // 👈 NEW FLAG
-let pendingRouteData = null; // 👈 store incoming data until map is ready
+
+let mapReady = false;          // Map initialized
+let pendingRouteData = null;   // Buffer for early data
 
 function initMap() {
   const defaultCenter = { lat: 32.028031, lng: 35.704308 };
@@ -15,7 +16,7 @@ function initMap() {
 
   mapReady = true;
 
-  // If Flutter already sent data before map was ready
+  // If data was sent before Google Maps finished loading
   if (pendingRouteData) {
     setRouteData(pendingRouteData.route, pendingRouteData.available);
     pendingRouteData = null;
@@ -23,13 +24,13 @@ function initMap() {
 }
 
 function setRouteData(routeJson, availableJson) {
+  // Map not ready yet → save & retry after init
   if (!mapReady) {
-    // 👈 Map is not ready yet → store the data
     pendingRouteData = { route: routeJson, available: availableJson };
     return;
   }
 
-  // clear markers
+  // Clear old markers
   routeMarkers.forEach((m) => m.setMap(null));
   availableMarkers.forEach((m) => m.setMap(null));
   routeMarkers = [];
@@ -65,18 +66,16 @@ function setRouteData(routeJson, availableJson) {
     });
 
     const info = new google.maps.InfoWindow({
-      content: `
-        <div style="font-size:13px;direction:rtl;text-align:right">
-          ${s.label || "نقطة"}
-        </div>
-      `,
+      content: `<div style="font-size:13px;direction:rtl;text-align:right">
+                  ${s.label || "نقطة"}
+                </div>`
     });
 
     marker.addListener("click", () => info.open(map, marker));
     routeMarkers.push(marker);
   });
 
-  // Polyline
+  // Draw Polyline
   if (routePath.length >= 2) {
     routePolyline = new google.maps.Polyline({
       path: routePath,
@@ -93,29 +92,26 @@ function setRouteData(routeJson, availableJson) {
     const pos = { lat: s.lat, lng: s.lng };
     bounds.extend(pos);
 
-    const title = `${s.studentName || "طالب"} - ${s.gradeName || ""}/${s.sectionName || ""}`;
-
     const marker = new google.maps.Marker({
       position: pos,
       map,
-      title,
+      title: `${s.studentName || "طالب"} - ${s.gradeName || ""}/${s.sectionName || ""}`,
       icon: "http://maps.google.com/mapfiles/ms/icons/orange-dot.png",
     });
 
     const info = new google.maps.InfoWindow({
-      content: `
-        <div style="font-size:13px;direction:rtl;text-align:right">
-          👨‍🎓 ${s.studentName || ""}
-          <br>
-          📚 ${s.gradeName || ""} - ${s.sectionName || ""}
-        </div>
-      `,
+      content: `<div style="font-size:13px;direction:rtl;text-align:right">
+                  👨‍🎓 ${s.studentName || ""}
+                  <br>
+                  📚 ${s.gradeName || ""} - ${s.sectionName || ""}
+                </div>`
     });
 
     marker.addListener("click", () => info.open(map, marker));
     availableMarkers.push(marker);
   });
 
+  // Fit map
   if (routeStops.length > 0 || availableStudents.length > 0) {
     map.fitBounds(bounds);
   } else {
