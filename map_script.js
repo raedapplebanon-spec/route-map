@@ -1,5 +1,5 @@
 let map;
-let routeMarkers = [];
+let routeMarkers = []; // Will store { marker, lat, lng } objects
 let availableMarkers = [];
 let directionsService;
 let directionsRenderer;
@@ -39,7 +39,6 @@ function groupCloseLocations(stops, tolerance = 5) {
         items: [stop],
         isStart: stop.isStart === true,
         isFinal: stop.isFinal === true,
-        // ⭐ STRICT FIX: Ensure hideMarker is treated as a boolean
         hideMarker: (stop.hideMarker === true || stop.hideMarker === 'true')
       });
     }
@@ -47,9 +46,6 @@ function groupCloseLocations(stops, tolerance = 5) {
   return clusters;
 }
 
-/**
- * 1. UI Update Function
- */
 function updateRouteSummary(km, minutes) {
   const summaryBox = document.getElementById("route-summary");
   const summaryText = document.getElementById("summary-text");
@@ -59,12 +55,9 @@ function updateRouteSummary(km, minutes) {
   }
 }
 
-/**
- * 2. Initialize Map
- */
 async function initMap() {
   const { Map } = await google.maps.importLibrary("maps");
-  const { AdvancedMarkerElement, PinElement } = await google.maps.importLibrary("marker");
+  await google.maps.importLibrary("marker");
 
   map = new Map(document.getElementById("map"), {
     center: { lat: 32.028031, lng: 35.704308 },
@@ -98,8 +91,7 @@ function setRouteData(routeArray, availableArray) {
     return;
   }
 
-  // Clear existing markers
-  routeMarkers.forEach(m => m.map = null);
+  routeMarkers.forEach(obj => obj.marker.map = null);
   availableMarkers.forEach(m => m.map = null);
   routeMarkers = [];
   availableMarkers = [];
@@ -131,59 +123,51 @@ function setRouteData(routeArray, availableArray) {
       infoWindow.open(map, marker);
     });
 
-    return marker;
+    return { marker, pin };
   };
 
   const routeClusters = groupCloseLocations(routeArray);
   const availableClusters = groupCloseLocations(availableArray);
 
-  // --- Route Markers (Blue) ---
+  // --- Route Markers ---
   routeClusters.forEach(cluster => {
-    // If Flutter says hide assigned markers, skip this cluster
     if (cluster.hideMarker === true) return;
 
     const pos = { lat: cluster.lat, lng: cluster.lng };
     bounds.extend(pos);
 
-    const isStart = cluster.isStart;
-    const isFinal = cluster.isFinal;
-    let color = isStart ? "#00c853" : (isFinal ? "#d50000" : "#1a73e8");
-    
-    let glyphText = cluster.items.length.toString();
-    if (isStart) glyphText = "S";
-    else if (isFinal) glyphText = "E";
+    let color = cluster.isStart ? "#00c853" : (cluster.isFinal ? "#d50000" : "#1a73e8");
+    let initialGlyph = cluster.isStart ? "S" : (cluster.isFinal ? "E" : "...");
 
     let html = `<div style="color:black;text-align:right;direction:rtl;min-width:150px;">`;
-    html += `<b style="color:${color};">محطة توقف (${cluster.items.length})</b><hr style="margin:5px 0;">`;
+    html += `<b style="color:${color};">محطة توقف</b><hr style="margin:5px 0;">`;
     cluster.items.forEach(x => { 
-      html += `<div style="margin-bottom:4px;">• <b>${x.label}</b></div>`; 
+      // ⭐ FIX: Show student names instead of generic label
+      let name = x.studentName || x.label || "طالب";
+      html += `<div style="margin-bottom:4px;">• <b>${name}</b></div>`; 
     });
     html += `</div>`;
 
-    routeMarkers.push(addMarker(pos, "route", html, color, glyphText));
+    const markerObj = addMarker(pos, "route", html, color, initialGlyph);
+    // Store extra data to update the number later
+    routeMarkers.push({ ...markerObj, lat: cluster.lat, lng: cluster.lng, isStart: cluster.isStart, isFinal: cluster.isFinal });
   });
 
-  // --- Available Markers (Orange) ---
+  // --- Available Markers ---
   availableClusters.forEach(cluster => {
-    // ⭐ THIS IS THE FILTER FIX: Skip if hideMarker is true
     if (cluster.hideMarker === true) return;
-
     const pos = { lat: cluster.lat, lng: cluster.lng };
     bounds.extend(pos);
-    
-    let glyphText = cluster.items.length.toString();
-
     let html = `<div style="color:black;text-align:right;direction:rtl;min-width:150px;">`;
-    html += `<b style="color:#ff9100;">طلاب خارج الجولة (${cluster.items.length})</b><hr style="margin:5px 0;">`;
+    html += `<b style="color:#ff9100;">خارج الجولة (${cluster.items.length})</b><hr style="margin:5px 0;">`;
     cluster.items.forEach(x => {
-      html += `<div style="margin-bottom:8px;">👨‍🎓 <b>${x.studentName}</b><br><small>الصف: ${x.gradeName} | ${x.sectionName}</small></div>`;
+      html += `<div style="margin-bottom:8px;">👨‍🎓 <b>${x.studentName}</b><br><small>${x.gradeName}</small></div>`;
     });
     html += `</div>`;
-
-    availableMarkers.push(addMarker(pos, "available", html, "#ff9100", glyphText));
+    const mObj = addMarker(pos, "available", html, "#ff9100", cluster.items.length.toString());
+    availableMarkers.push(mObj.marker);
   });
 
-  // Always calculate the line based on the trip clusters
   if (routeClusters.length >= 2) {
     calculateRoadRoute(routeClusters);
   }
@@ -192,30 +176,36 @@ function setRouteData(routeArray, availableArray) {
 }
 
 /**
- * 4. Road Route Logic
+ * 4. Road Route Logic (With Order Sync)
  */
 function calculateRoadRoute(clusters) {
   const startStop = clusters.find(c => c.isStart);
   const endStop = clusters.find(c => c.isFinal);
-
   if (!startStop || !endStop) return;
 
-  const waypoints = clusters
-    .filter(c => !c.isStart && !c.isFinal)
-    .map(c => ({
-      location: { lat: c.lat, lng: c.lng },
-      stopover: true,
-    }));
+  const waypointClusters = clusters.filter(c => !c.isStart && !c.isFinal);
 
   directionsService.route({
     origin: { lat: startStop.lat, lng: startStop.lng },
     destination: { lat: endStop.lat, lng: endStop.lng },
-    waypoints: waypoints,
+    waypoints: waypointClusters.map(c => ({ location: { lat: c.lat, lng: c.lng }, stopover: true })),
     travelMode: google.maps.TravelMode.DRIVING,
     optimizeWaypoints: true,
   }, (result, status) => {
     if (status === "OK") {
       directionsRenderer.setDirections(result);
+      
+      // ⭐ THE FIX: Update numbers based on Google's optimized order
+      const optimizedOrder = result.routes[0].waypoint_order; 
+      optimizedOrder.forEach((originalIndex, stepIndex) => {
+        const clusterData = waypointClusters[originalIndex];
+        // Find the marker we drew for this specific location
+        const markerObj = routeMarkers.find(m => m.lat === clusterData.lat && m.lng === clusterData.lng);
+        if (markerObj) {
+          markerObj.pin.glyph = (stepIndex + 1).toString(); // Set to 1, 2, 3...
+        }
+      });
+
       const route = result.routes[0];
       let dist = 0, dur = 0;
       route.legs.forEach(leg => { dist += leg.distance.value; dur += leg.duration.value; });
