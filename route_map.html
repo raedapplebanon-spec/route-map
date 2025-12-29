@@ -8,7 +8,7 @@
   <link rel="stylesheet"
         href="https://raedapplebanon-spec.github.io/route-map/style.css?v=3" />
 
-  <!-- Load map_script.js FIRST so initMap() exists -->
+  <!-- Load map_script.js FIRST so initMap() + setRouteData() exist -->
   <script src="https://raedapplebanon-spec.github.io/route-map/map_script.js?v=3"></script>
 
   <!-- Google Maps API calls initMap() after loading -->
@@ -17,26 +17,22 @@
     async defer>
   </script>
 
-  <!-- Read URL params and push JSON to map_script.js -->
+  <!-- 🔁 Listen for messages from Flutter (postMessage) -->
   <script>
-    function sendParamsToMap() {
-      const params = new URLSearchParams(window.location.search);
-
-      const routeData = params.get("routeData") || "[]";
-      const availableData = params.get("availableData") || "[]";
-
-      function trySend() {
-        if (window.setRouteData) {
-          window.setRouteData(routeData, availableData);
-        } else {
-          setTimeout(trySend, 120);
-        }
+    window.addEventListener("message", function (event) {
+      if (!event.data || event.data.action !== "setRouteData") {
+        return;
       }
 
-      trySend();
-    }
+      const routeJson = event.data.routeData || "[]";
+      const availableJson = event.data.availableData || "[]";
 
-    window.onload = sendParamsToMap;
+      if (window.setRouteData) {
+        window.setRouteData(routeJson, availableJson);
+      } else {
+        console.warn("setRouteData() is not ready yet");
+      }
+    });
   </script>
 </head>
 
@@ -61,6 +57,5 @@
       <span>طلاب غير مضافين للخط</span>
     </div>
   </div>
-
 </body>
 </html>
