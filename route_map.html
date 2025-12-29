@@ -5,33 +5,32 @@
   <title>Route Map</title>
 
   <link rel="stylesheet" href="https://raedapplebanon-spec.github.io/route-map/style.css?v=3" />
-  <script src="https://raedapplebanon-spec.github.io/route-map/map_script.js?v=3"></script>
+  
+  <script src="https://raedapplebanon-spec.github.io/route-map/map_script.js?v=4"></script>
 
   <script
-    src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCYaJ4Gjq36mq8swYgjNXOYr5mKZi45niA&callback=initMap"
+    src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCYaJ4Gjq36mq8swYgjNXOYr5mKZi45niA&callback=initMap&libraries=marker&v=beta"
     async defer>
   </script>
 
-  <!-- FIXED HANDLER -->
   <script>
-  window.addEventListener("message", function (event) {
-    if (!event.data || event.data.action !== "setRouteData") {
-      return;
-    }
+    window.addEventListener("message", function (event) {
+      if (!event.data || event.data.action !== "setRouteData") {
+        return;
+      }
 
-    const routeData = event.data.routeData || [];
-    const availableData = event.data.availableData || [];
+      const routeData = event.data.routeData || [];
+      const availableData = event.data.availableData || [];
 
-    console.log("📩 Received from Flutter:", routeData, availableData);
+      console.log("📩 Received from Flutter:", routeData, availableData);
 
-    if (window.setRouteData) {
-      window.setRouteData(routeData, availableData);
-    } else {
-      console.warn("setRouteData() is not ready yet");
-    }
-  });
-</script>
-
+      if (window.setRouteData) {
+        window.setRouteData(routeData, availableData);
+      } else {
+        console.warn("setRouteData() is not ready yet");
+      }
+    });
+  </script>
 </head>
 
 <body>
@@ -48,11 +47,11 @@
     </div>
     <div class="legend-row">
       <div class="legend-color" style="background:#1a73e8"></div>
-      <span>محطات داخل الخط</span>
+      <span>طلاب داخل الجولة</span>
     </div>
     <div class="legend-row">
       <div class="legend-color" style="background:#ff9100"></div>
-      <span>طلاب غير مضافين للخط</span>
+      <span>طلاب بدون جولات</span>
     </div>
   </div>
 </body>
