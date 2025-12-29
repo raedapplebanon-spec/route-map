@@ -41,18 +41,36 @@ async function initMap() {
   }
 }
 
+// --- NEW FUNCTION: Update the HTML UI Directly ---
+function updateRouteSummary(km, minutes) {
+  const summaryBox = document.getElementById("route-summary");
+  const summaryText = document.getElementById("summary-text");
+
+  if (summaryBox && summaryText) {
+    summaryBox.classList.remove("hidden"); // Make it visible
+    summaryText.innerHTML = `
+      المسافة: <b>${km} كم</b><br>
+      الوقت: <b>${minutes} دقيقة</b>
+    `;
+  }
+}
+
 function setRouteData(routeArray, availableArray) {
   if (!mapReady) {
     pendingData = { route: routeArray, available: availableArray };
     return;
   }
 
-  // CLEAR MARKERS
+  // CLEAR DATA
   routeMarkers.forEach(m => m.map = null);
   availableMarkers.forEach(m => m.map = null);
   routeMarkers = [];
   availableMarkers = [];
   directionsRenderer.setDirections({ routes: [] });
+  
+  // Hide summary until new route is calculated
+  const summaryBox = document.getElementById("route-summary");
+  if (summaryBox) summaryBox.classList.add("hidden");
 
   const bounds = new google.maps.LatLngBounds();
   const infoWindow = new google.maps.InfoWindow();
@@ -79,7 +97,6 @@ function setRouteData(routeArray, availableArray) {
     return marker;
   };
 
-  // DRAW ROUTE MARKERS
   routeArray.forEach((s) => {
     const pos = { lat: s.lat, lng: s.lng };
     bounds.extend(pos);
@@ -97,7 +114,6 @@ function setRouteData(routeArray, availableArray) {
     routeMarkers.push(addMarker(pos, s.label, html, color));
   });
 
-  // DRAW AVAILABLE MARKERS
   availableArray.forEach((s) => {
     const pos = { lat: s.lat, lng: s.lng };
     bounds.extend(pos);
@@ -118,7 +134,6 @@ function setRouteData(routeArray, availableArray) {
 }
 
 function calculateRoadRoute(allStops) {
-
   const stops = allStops.filter(s =>
     s.isStart === true ||
     s.isFinal === true ||
@@ -150,7 +165,6 @@ function calculateRoadRoute(allStops) {
       if (status === "OK") {
         directionsRenderer.setDirections(result);
 
-        // 1️⃣ GET SUMMARY
         const route = result.routes[0];
         const legs = route.legs;
 
@@ -158,14 +172,14 @@ function calculateRoadRoute(allStops) {
         let totalDuration = 0;
 
         legs.forEach(leg => {
-          totalDistance += leg.distance.value; // meters
-          totalDuration += leg.duration.value; // seconds
+          totalDistance += leg.distance.value; 
+          totalDuration += leg.duration.value; 
         });
 
-        // Convert to km/minutes
-        const km = (totalDistance / 1000).toFixed(2);
+        const km = (totalDistance / 1000).toFixed(1);
         const minutes = Math.round(totalDuration / 60);
 
+        // CALL THE UI UPDATE
         updateRouteSummary(km, minutes);
       }
     }
@@ -174,5 +188,3 @@ function calculateRoadRoute(allStops) {
 
 window.initMap = initMap;
 window.setRouteData = setRouteData;
-
-
