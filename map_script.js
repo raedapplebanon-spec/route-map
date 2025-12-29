@@ -1,4 +1,4 @@
-map;
+let map;
 let routeMarkers = [];
 let availableMarkers = [];
 let routePolyline = null;
@@ -121,3 +121,4 @@ function setRouteData(routeArray, availableArray) {
 
 window.initMap = initMap;
 window.setRouteData = setRouteData;
+
