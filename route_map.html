@@ -5,33 +5,32 @@
   <title>Route Map</title>
 
   <link rel="stylesheet" href="https://raedapplebanon-spec.github.io/route-map/style.css?v=3" />
+  <script src="https://raedapplebanon-spec.github.io/route-map/map_script.js?v=3"></script>
 
-  <!-- Updated JS version -->
- <script src="https://raedapplebanon-spec.github.io/route-map/map_script.js?v=9"></script>
-
-  <!-- Google Maps (geometry only) -->
   <script
-    src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCYaJ4Gjq36mq8swYgjNXOYr5mKZi45niA&callback=initMap&libraries=geometry"
+    src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCYaJ4Gjq36mq8swYgjNXOYr5mKZi45niA&callback=initMap"
     async defer>
   </script>
 
-  <!-- Flutter → JS message handler -->
+  <!-- FIXED HANDLER -->
   <script>
-    window.addEventListener("message", function (event) {
-      if (!event.data || event.data.action !== "setRouteData") return;
+  window.addEventListener("message", function (event) {
+    if (!event.data || event.data.action !== "setRouteData") {
+      return;
+    }
 
-      const routeData = event.data.routeData || [];
-      const availableData = event.data.availableData || [];
+    const routeData = event.data.routeData || [];
+    const availableData = event.data.availableData || [];
 
-      console.log("📩 Received from Flutter:", routeData, availableData);
+    console.log("📩 Received from Flutter:", routeData, availableData);
 
-      if (window.setRouteData) {
-        window.setRouteData(routeData, availableData);
-      } else {
-        console.warn("setRouteData() is not ready yet");
-      }
-    });
-  </script>
+    if (window.setRouteData) {
+      window.setRouteData(routeData, availableData);
+    } else {
+      console.warn("setRouteData() is not ready yet");
+    }
+  });
+</script>
 
 </head>
 
@@ -53,9 +52,8 @@
     </div>
     <div class="legend-row">
       <div class="legend-color" style="background:#ff9100"></div>
-      <span>طلاب غير مضافين للجولة</span>
+      <span>طلاب غير مضافين للخط</span>
     </div>
   </div>
 </body>
 </html>
-
