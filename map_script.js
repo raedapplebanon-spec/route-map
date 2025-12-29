@@ -6,9 +6,6 @@ let routePolyline = null;
 let mapReady = false;
 let pendingRouteData = null;
 
-// Your API key here
-const API_KEY = "AIzaSyCYaJ4Gjq36mq8swYgjNXOYr5mKZi45niA";
-
 // ---------------------------------------------------------
 // Initialize Google Map
 // ---------------------------------------------------------
@@ -48,40 +45,31 @@ function drawPolyline(encoded) {
 }
 
 // ---------------------------------------------------------
-// Call Google Routes API (REST)
+// Call Supabase Edge Function (server-side routing)
 // ---------------------------------------------------------
 async function requestDrivingRoute(origin, destination, waypoints = []) {
-  const body = {
-    origin: {
-      location: { latLng: { latitude: origin.lat, longitude: origin.lng } },
-    },
-    destination: {
-      location: { latLng: { latitude: destination.lat, longitude: destination.lng } },
-    },
-    travelMode: "DRIVE",
-    polylineQuality: "HIGH_QUALITY",
-    intermediates: waypoints.map((p) => ({
-      location: { latLng: { latitude: p.lat, longitude: p.lng } },
-    })),
-  };
-
   const response = await fetch(
-    "https://routes.googleapis.com/v2:computeRoutes",
+    "https://yrhhdstnolguxmesxnnv.supabase.co/functions/v1/get_route",
     {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "X-Goog-Api-Key": API_KEY,
-        "X-Goog-FieldMask": "routes.polyline",
       },
-      body: JSON.stringify(body),
+      body: JSON.stringify({
+        origin: { latitude: origin.lat, longitude: origin.lng },
+        destination: { latitude: destination.lat, longitude: destination.lng },
+        waypoints: waypoints.map((p) => ({
+          latitude: p.lat,
+          longitude: p.lng,
+        })),
+      }),
     }
   );
 
   const data = await response.json();
 
   if (!data.routes || data.routes.length === 0) {
-    console.error("❌ No route from API:", data);
+    console.error("❌ No route returned:", data);
     return;
   }
 
