@@ -105,7 +105,8 @@ function setRouteData(routeArray, availableArray) {
 
   // 1. Draw Route Markers (Blue/Green/Red)
   routeArray.forEach((s) => {
-    // 🛑 Skip drawing the marker if the filter says hide it
+    // We keep the check here just in case, but based on our new Flutter logic, 
+    // hideMarker for routeArray will now always be false.
     if (s.hideMarker === true) return; 
 
     const pos = { lat: parseFloat(s.lat), lng: parseFloat(s.lng) };
@@ -119,7 +120,8 @@ function setRouteData(routeArray, availableArray) {
 
   // 2. Draw Available Markers (Orange)
   availableArray.forEach((s) => {
-    // 🛑 Skip drawing if hidden
+    // This will be TRUE if the Flutter filter is "داخل الجولة"
+    // This will be FALSE if the Flutter filter is "الكل"
     if (s.hideMarker === true) return;
 
     const pos = { lat: parseFloat(s.lat), lng: parseFloat(s.lng) };
@@ -131,11 +133,12 @@ function setRouteData(routeArray, availableArray) {
   });
 
   // 3. Always calculate route based on the FULL array 
-  // (the line stays even if markers are hidden)
   if (routeArray.length >= 2) calculateRoadRoute(routeArray);
   
-  if (routeArray.length + availableArray.length > 0) map.fitBounds(bounds);
-}
+  // 4. Fit bounds only to visible markers
+  if (!bounds.isEmpty()) {
+    map.fitBounds(bounds);
+  }
 
 /**
  * 4. Road Route Logic
@@ -200,4 +203,5 @@ function calculateRoadRoute(allStops) {
 
 window.initMap = initMap;
 window.setRouteData = setRouteData;
+
 
