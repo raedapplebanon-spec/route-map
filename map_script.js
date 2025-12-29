@@ -1,12 +1,13 @@
 let map;
 let routeMarkers = [];
 let availableMarkers = [];
-
-let routeService;      // NEW Routes API client
-let routeRenderer;     // Custom polyline renderer
+let routePolyline = null;
 
 let mapReady = false;
 let pendingRouteData = null;
+
+// Your API key here
+const API_KEY = "AIzaSyCYaJ4Gjq36mq8swYgjNXOYr5mKZi45niA";
 
 // ---------------------------------------------------------
 // Initialize Google Map
@@ -19,9 +20,6 @@ function initMap() {
     zoom: 13,
   });
 
-  // NEW Google Maps Routes API client
-  routeService = new google.maps.routes.RoutesService();
-
   mapReady = true;
 
   if (pendingRouteData) {
@@ -31,20 +29,16 @@ function initMap() {
 }
 
 // ---------------------------------------------------------
-// Draw polyline manually from Routes API response
+// Draw Polyline from encoded polyline
 // ---------------------------------------------------------
-function drawRoutePolyline(polyline) {
-  if (!polyline || !polyline.encodedPolyline) return;
-
-  const path = google.maps.geometry.encoding.decodePath(
-    polyline.encodedPolyline
-  );
-
-  if (routeRenderer) {
-    routeRenderer.setMap(null);
+function drawPolyline(encoded) {
+  if (routePolyline) {
+    routePolyline.setMap(null);
   }
 
-  routeRenderer = new google.maps.Polyline({
+  const path = google.maps.geometry.encoding.decodePath(encoded);
+
+  routePolyline = new google.maps.Polyline({
     path,
     strokeColor: "#1a73e8",
     strokeOpacity: 0.9,
@@ -54,7 +48,49 @@ function drawRoutePolyline(polyline) {
 }
 
 // ---------------------------------------------------------
-// Handle route data
+// Call Google Routes API (REST)
+// ---------------------------------------------------------
+async function requestDrivingRoute(origin, destination, waypoints = []) {
+  const body = {
+    origin: {
+      location: { latLng: { latitude: origin.lat, longitude: origin.lng } },
+    },
+    destination: {
+      location: { latLng: { latitude: destination.lat, longitude: destination.lng } },
+    },
+    travelMode: "DRIVE",
+    polylineQuality: "HIGH_QUALITY",
+    intermediates: waypoints.map((p) => ({
+      location: { latLng: { latitude: p.lat, longitude: p.lng } },
+    })),
+  };
+
+  const response = await fetch(
+    "https://routes.googleapis.com/v2:computeRoutes",
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Goog-Api-Key": API_KEY,
+        "X-Goog-FieldMask": "routes.polyline",
+      },
+      body: JSON.stringify(body),
+    }
+  );
+
+  const data = await response.json();
+
+  if (!data.routes || data.routes.length === 0) {
+    console.error("❌ No route from API:", data);
+    return;
+  }
+
+  const encoded = data.routes[0].polyline.encodedPolyline;
+  drawPolyline(encoded);
+}
+
+// ---------------------------------------------------------
+// Update map with new stops
 // ---------------------------------------------------------
 function setRouteData(routeArray, availableArray) {
   if (!mapReady) {
@@ -62,89 +98,63 @@ function setRouteData(routeArray, availableArray) {
     return;
   }
 
-  // Clear old markers
+  // Clear markers
   routeMarkers.forEach((m) => m.setMap(null));
   availableMarkers.forEach((m) => m.setMap(null));
   routeMarkers = [];
   availableMarkers = [];
 
-  if (routeRenderer) {
-    routeRenderer.setMap(null);
-    routeRenderer = null;
+  if (routePolyline) {
+    routePolyline.setMap(null);
+    routePolyline = null;
   }
-
-  const routeStops = Array.isArray(routeArray) ? routeArray : [];
-  const availableStudents = Array.isArray(availableArray) ? availableArray : [];
 
   const bounds = new google.maps.LatLngBounds();
   const routePath = [];
 
-  // Add route markers
-  routeStops.forEach((s) => {
+  // Route markers
+  routeArray.forEach((s) => {
     const pos = { lat: s.lat, lng: s.lng };
     bounds.extend(pos);
     routePath.push(pos);
 
-    let iconUrl = "https://maps.google.com/mapfiles/ms/icons/blue-dot.png";
-    if (s.isStart) iconUrl = "https://maps.google.com/mapfiles/ms/icons/green-dot.png";
-    else if (s.isFinal) iconUrl = "https://maps.google.com/mapfiles/ms/icons/red-dot.png";
+    let icon = "https://maps.google.com/mapfiles/ms/icons/blue-dot.png";
+    if (s.isStart) icon = "https://maps.google.com/mapfiles/ms/icons/green-dot.png";
+    else if (s.isFinal) icon = "https://maps.google.com/mapfiles/ms/icons/red-dot.png";
 
     const marker = new google.maps.Marker({
       position: pos,
       map,
+      icon,
       title: s.label || "",
-      icon: iconUrl,
     });
 
     routeMarkers.push(marker);
   });
 
-  // ----------------------------------------
-  // NEW: Draw REAL DRIVING ROUTE (Routes API)
-  // ----------------------------------------
+  // Call routing if at least two points
   if (routePath.length >= 2) {
     const origin = routePath[0];
     const destination = routePath[routePath.length - 1];
+    const waypoints = routePath.slice(1, -1);
 
-    const waypoints = routePath.slice(1, -1).map((p) => ({
-      location: { latLng: { latitude: p.lat, longitude: p.lng } }
-    }));
-
-    routeService.computeRoutes(
-      {
-        origin: { location: { latLng: { latitude: origin.lat, longitude: origin.lng } } },
-        destination: { location: { latLng: { latitude: destination.lat, longitude: destination.lng } } },
-        intermediates: waypoints,
-        travelMode: "DRIVE",
-        polylineQuality: "HIGH_QUALITY",
-        polylineEncoding: "ENCODED_POLYLINE",
-      },
-      (response) => {
-        if (response.routes && response.routes.length > 0) {
-          drawRoutePolyline(response.routes[0].polyline);
-        } else {
-          console.error("❌ No routes returned:", response);
-        }
-      }
-    );
+    requestDrivingRoute(origin, destination, waypoints);
   }
 
-  // Add available markers
-  availableStudents.forEach((s) => {
+  // Available markers
+  availableArray.forEach((s) => {
     const pos = { lat: s.lat, lng: s.lng };
     bounds.extend(pos);
 
     const marker = new google.maps.Marker({
       position: pos,
       map,
-      title: `${s.studentName || "طالب"} - ${s.gradeName || ""}/${s.sectionName || ""}`,
       icon: "https://maps.google.com/mapfiles/ms/icons/orange-dot.png",
     });
 
     availableMarkers.push(marker);
   });
 
-  // Fit map
   map.fitBounds(bounds);
 }
 
