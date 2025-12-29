@@ -4,20 +4,23 @@
   <meta charset="UTF-8" />
   <title>Route Map</title>
 
-  <link rel="stylesheet" href="https://raedapplebanon-spec.github.io/route-map/style.css?v=3" />
+  <!-- CSS -->
+  <link rel="stylesheet" 
+        href="https://raedapplebanon-spec.github.io/route-map/style.css?v=3" />
   
-  <script src="https://raedapplebanon-spec.github.io/route-map/map_script.js?v=4"></script>
+  <!-- JS (your map logic) -->
+  <script src="https://raedapplebanon-spec.github.io/route-map/map_script.js?v=5"></script>
 
+  <!-- Google Maps -->
   <script
     src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCYaJ4Gjq36mq8swYgjNXOYr5mKZi45niA&callback=initMap&libraries=marker&v=beta"
     async defer>
   </script>
 
+  <!-- Flutter → Web Bridge -->
   <script>
     window.addEventListener("message", function (event) {
-      if (!event.data || event.data.action !== "setRouteData") {
-        return;
-      }
+      if (!event.data || event.data.action !== "setRouteData") return;
 
       const routeData = event.data.routeData || [];
       const availableData = event.data.availableData || [];
@@ -27,15 +30,39 @@
       if (window.setRouteData) {
         window.setRouteData(routeData, availableData);
       } else {
-        console.warn("setRouteData() is not ready yet");
+        console.warn("⚠️ setRouteData() not ready yet");
       }
     });
   </script>
+
+  <style>
+    /* Add CSS for route summary */
+    .route-summary {
+      position: absolute;
+      bottom: 20px;
+      left: 20px;
+      background: white;
+      padding: 12px 16px;
+      border-radius: 10px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+      font-size: 14px;
+      line-height: 1.6;
+      direction: rtl;
+      text-align: right;
+      z-index: 9999;
+    }
+
+    .hidden {
+      display: none;
+    }
+  </style>
 </head>
 
 <body>
+  <!-- MAP -->
   <div id="map"></div>
 
+  <!-- LEGEND -->
   <div class="legend">
     <div class="legend-row">
       <div class="legend-color" style="background:#00c853"></div>
@@ -54,5 +81,12 @@
       <span>طلاب بدون جولات</span>
     </div>
   </div>
+
+  <!-- 📌 ROUTE SUMMARY BOX -->
+  <div id="route-summary" class="route-summary hidden">
+    <h3 style="margin:0; font-size:15px;">📍 ملخص الجولة</h3>
+    <p id="summary-text" style="margin:6px 0 0 0;">—</p>
+  </div>
+
 </body>
 </html>
