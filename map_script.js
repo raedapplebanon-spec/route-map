@@ -54,6 +54,7 @@ async function requestDrivingRoute(origin, destination, waypoints = []) {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
+        "x-client-info": "transport-web"   // ✅ REQUIRED FIX
       },
       body: JSON.stringify({
         origin: { latitude: origin.lat, longitude: origin.lng },
@@ -76,6 +77,7 @@ async function requestDrivingRoute(origin, destination, waypoints = []) {
   const encoded = data.routes[0].polyline.encodedPolyline;
   drawPolyline(encoded);
 }
+
 
 // ---------------------------------------------------------
 // Update map with new stops
@@ -148,3 +150,4 @@ function setRouteData(routeArray, availableArray) {
 
 window.initMap = initMap;
 window.setRouteData = setRouteData;
+
