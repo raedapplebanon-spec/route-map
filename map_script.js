@@ -37,9 +37,9 @@ function groupCloseLocations(stops, tolerance = 5) {
         lat: parseFloat(stop.lat),
         lng: parseFloat(stop.lng),
         items: [stop],
-        // Preserve flags for the router
         isStart: stop.isStart === true,
-        isFinal: stop.isFinal === true
+        isFinal: stop.isFinal === true,
+        hideMarker: stop.hideMarker === true || stop.hideMarker === 'true'
       });
     }
   });
@@ -63,7 +63,7 @@ function updateRouteSummary(km, minutes) {
  */
 async function initMap() {
   const { Map } = await google.maps.importLibrary("maps");
-  await google.maps.importLibrary("marker");
+  const { AdvancedMarkerElement, PinElement } = await google.maps.importLibrary("marker");
 
   map = new Map(document.getElementById("map"), {
     center: { lat: 32.028031, lng: 35.704308 },
@@ -109,50 +109,78 @@ function setRouteData(routeArray, availableArray) {
   const bounds = new google.maps.LatLngBounds();
   const infoWindow = new google.maps.InfoWindow();
 
-  const addMarker = (pos, title, html, color) => {
-    const pin = new google.maps.marker.PinElement({ background: color, borderColor: "#FFFFFF", glyphColor: "#FFFFFF" });
-    const marker = new google.maps.marker.AdvancedMarkerElement({ map: map, position: pos, title: title, content: pin.element });
+  // ⭐ Updated addMarker to handle glyph text (The Count)
+  const addMarker = (pos, title, html, color, glyphText) => {
+    const pin = new google.maps.marker.PinElement({
+      background: color,
+      borderColor: "#FFFFFF",
+      glyphColor: "#FFFFFF",
+      glyph: glyphText // This shows the number inside the pin
+    });
+
+    const marker = new google.maps.marker.AdvancedMarkerElement({
+      map: map,
+      position: pos,
+      title: title,
+      content: pin.element,
+    });
+
     marker.addListener("click", () => {
       infoWindow.setContent(html);
       infoWindow.open(map, marker);
     });
+
     return marker;
   };
 
-  // Cluster the data
   const routeClusters = groupCloseLocations(routeArray);
   const availableClusters = groupCloseLocations(availableArray);
 
-  // Draw Route Markers
+  // --- Route Markers ---
   routeClusters.forEach(cluster => {
+    if (cluster.hideMarker) return;
+
     const pos = { lat: cluster.lat, lng: cluster.lng };
     bounds.extend(pos);
 
     const isStart = cluster.items.some(x => x.isStart);
     const isFinal = cluster.items.some(x => x.isFinal);
     let color = isStart ? "#00c853" : (isFinal ? "#d50000" : "#1a73e8");
+    
+    // Logic for glyph: Show 'S' for start, 'E' for end, or the count for stops
+    let glyphText = cluster.items.length.toString();
+    if (isStart) glyphText = "S";
+    else if (isFinal) glyphText = "E";
 
-    let html = `<div style="color:black;text-align:right;direction:rtl;">`;
-    if (cluster.items.length > 1) html += `<b style="color:#1a73e8;">تجمع (${cluster.items.length} طلاب):</b><br>`;
-    cluster.items.forEach(x => { html += `• ${x.label}<br>`; });
-    html += `</div>`;
-
-    routeMarkers.push(addMarker(pos, "route", html, color));
-  });
-
-  // Draw Available Markers
-  availableClusters.forEach(cluster => {
-    const pos = { lat: cluster.lat, lng: cluster.lng };
-    bounds.extend(pos);
-    let html = `<div style="color:black;text-align:right;direction:rtl;">`;
-    cluster.items.forEach(x => {
-      html += `👨‍🎓 <strong>${x.studentName}</strong><br>الصف: ${x.gradeName}<br><br>`;
+    let html = `<div style="color:black;text-align:right;direction:rtl;min-width:150px;">`;
+    html += `<b style="color:${color};">محطة توقف (${cluster.items.length})</b><hr style="margin:5px 0;">`;
+    cluster.items.forEach(x => { 
+      html += `<div style="margin-bottom:4px;">• <b>${x.label}</b></div>`; 
     });
     html += `</div>`;
-    availableMarkers.push(addMarker(pos, "available", html, "#ff9100"));
+
+    routeMarkers.push(addMarker(pos, "route", html, color, glyphText));
   });
 
-  // Calculate route using CLUSTERS (to save waypoints)
+  // --- Available Markers ---
+  availableClusters.forEach(cluster => {
+    if (cluster.hideMarker) return;
+
+    const pos = { lat: cluster.lat, lng: cluster.lng };
+    bounds.extend(pos);
+    
+    let glyphText = cluster.items.length.toString();
+
+    let html = `<div style="color:black;text-align:right;direction:rtl;min-width:150px;">`;
+    html += `<b style="color:#ff9100;">طلاب خارج الجولة (${cluster.items.length})</b><hr style="margin:5px 0;">`;
+    cluster.items.forEach(x => {
+      html += `<div style="margin-bottom:8px;">👨‍🎓 <b>${x.studentName}</b><br><small>الصف: ${x.gradeName} | ${x.sectionName}</small></div>`;
+    });
+    html += `</div>`;
+
+    availableMarkers.push(addMarker(pos, "available", html, "#ff9100", glyphText));
+  });
+
   if (routeClusters.length >= 2) {
     calculateRoadRoute(routeClusters);
   }
@@ -161,10 +189,9 @@ function setRouteData(routeArray, availableArray) {
 }
 
 /**
- * 4. Road Route Logic (Clustered Version)
+ * 4. Road Route Logic
  */
 function calculateRoadRoute(clusters) {
-  // Identify start/end from clusters
   const startStop = clusters.find(c => c.items.some(x => x.isStart));
   const endStop = clusters.find(c => c.items.some(x => x.isFinal));
 
