@@ -126,38 +126,40 @@ function setRouteData(routeArray, availableArray) {
 }
 
 function calculateRoadRoute(stops) {
-  // Origin is the first point
+  if (!directionsService) return;
+
   const origin = { lat: stops[0].lat, lng: stops[0].lng };
-  
-  // Destination is the last point
   const destination = { lat: stops[stops.length - 1].lat, lng: stops[stops.length - 1].lng };
 
-  // Waypoints are everything in between
-  // Google Maps has a limit of 25 waypoints (including start/end). 
-  // If you have more, we just take the first 23 intermediates to prevent crashing.
-  const intermediates = stops.slice(1, -1);
-  const waypoints = intermediates.slice(0, 23).map((stop) => ({
+  // Note: Directions API (Legacy) is still the standard for JS DirectionsRenderer.
+  // We keep optimizeWaypoints: false to ensure the school route order is strictly followed.
+  const waypoints = stops.slice(1, -1).map((stop) => ({
     location: { lat: stop.lat, lng: stop.lng },
     stopover: true,
   }));
 
-  const request = {
-    origin: origin,
-    destination: destination,
-    waypoints: waypoints,
-    travelMode: google.maps.TravelMode.DRIVING,
-    optimizeWaypoints: false, // Keep the order the school manager set
-  };
-
-  directionsService.route(request, function (result, status) {
-    if (status === google.maps.DirectionsStatus.OK) {
-      directionsRenderer.setDirections(result);
-    } else {
-      console.error("Directions request failed: " + status);
+  directionsService.route(
+    {
+      origin: origin,
+      destination: destination,
+      waypoints: waypoints,
+      travelMode: google.maps.TravelMode.DRIVING,
+      optimizeWaypoints: false,
+    },
+    (result, status) => {
+      if (status === "OK") {
+        directionsRenderer.setDirections(result);
+      } else if (status === "REQUEST_DENIED") {
+        console.error("❌ Google says: REQUEST_DENIED. Check if 'Directions API' is enabled in Cloud Console and billing is active.");
+        alert("Map Error: Please enable Directions API in Google Cloud Console.");
+      } else {
+        console.error("Road route failed due to: " + status);
+      }
     }
-  });
+  );
 }
 
 // Expose functions globally
 window.initMap = initMap;
 window.setRouteData = setRouteData;
+
