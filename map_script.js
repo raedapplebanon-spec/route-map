@@ -65,9 +65,9 @@ function setRouteData(routeArray, availableArray) {
     });
 
     const info = new google.maps.InfoWindow({
-      content: <div style="font-size:13px;direction:rtl;text-align:right">
+      content: `<div style="font-size:13px;direction:rtl;text-align:right">
                   ${s.label || "نقطة"}
-                </div>
+                </div>`
     });
 
     marker.addListener("click", () => info.open(map, marker));
@@ -94,16 +94,16 @@ function setRouteData(routeArray, availableArray) {
     const marker = new google.maps.Marker({
       position: pos,
       map,
-      title: ${s.studentName || "طالب"} - ${s.gradeName || ""}/${s.sectionName || ""},
+      title: `${s.studentName || "طالب"} - ${s.gradeName || ""}/${s.sectionName || ""}`,
       icon: "https://maps.google.com/mapfiles/ms/icons/orange-dot.png",
     });
 
     const info = new google.maps.InfoWindow({
-      content: <div style="font-size:13px;direction:rtl;text-align:right">
+      content: `<div style="font-size:13px;direction:rtl;text-align:right">
                   👨‍🎓 ${s.studentName || ""}
                   <br>
                   📚 ${s.gradeName || ""} - ${s.sectionName || ""}
-                </div>
+                </div>`
     });
 
     marker.addListener("click", () => info.open(map, marker));
@@ -121,4 +121,3 @@ function setRouteData(routeArray, availableArray) {
 
 window.initMap = initMap;
 window.setRouteData = setRouteData;
-
