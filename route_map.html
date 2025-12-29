@@ -4,20 +4,15 @@
   <meta charset="UTF-8" />
   <title>Route Map</title>
 
-  <!-- CSS -->
-  <link rel="stylesheet" 
-        href="https://raedapplebanon-spec.github.io/route-map/style.css?v=3" />
+  <link rel="stylesheet" href="https://raedapplebanon-spec.github.io/route-map/style.css?v=3" />
   
-  <!-- JS (your map logic) -->
-  <script src="https://raedapplebanon-spec.github.io/route-map/map_script.js?v=5"></script>
+  <script src="https://raedapplebanon-spec.github.io/route-map/map_script.js?v=6"></script>
 
-  <!-- Google Maps -->
   <script
     src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCYaJ4Gjq36mq8swYgjNXOYr5mKZi45niA&callback=initMap&libraries=marker&v=beta"
     async defer>
   </script>
 
-  <!-- Flutter → Web Bridge -->
   <script>
     window.addEventListener("message", function (event) {
       if (!event.data || event.data.action !== "setRouteData") return;
@@ -36,33 +31,50 @@
   </script>
 
   <style>
-    /* Add CSS for route summary */
+    /* Final Styling for the Route Summary */
     .route-summary {
       position: absolute;
-      bottom: 20px;
-      left: 20px;
+      bottom: 25px; /* Shifted up to clear the Google logo */
+      left: 15px;
       background: white;
-      padding: 12px 16px;
-      border-radius: 10px;
-      box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+      padding: 14px 18px;
+      border-radius: 12px;
+      box-shadow: 0 4px 15px rgba(0,0,0,0.2);
       font-size: 14px;
-      line-height: 1.6;
+      line-height: 1.5;
       direction: rtl;
       text-align: right;
       z-index: 9999;
+      min-width: 160px;
+      border: 1px solid #eee;
+    }
+
+    .route-summary h3 {
+      color: #1a73e8;
+      border-bottom: 1px solid #eee;
+      padding-bottom: 5px;
+      margin-bottom: 8px;
     }
 
     .hidden {
       display: none;
     }
+
+    /* Ensure legend and summary don't overlap on very small screens */
+    @media (max-width: 400px) {
+      .route-summary {
+        font-size: 12px;
+        padding: 10px;
+        bottom: 15px;
+        left: 10px;
+      }
+    }
   </style>
 </head>
 
 <body>
-  <!-- MAP -->
   <div id="map"></div>
 
-  <!-- LEGEND -->
   <div class="legend">
     <div class="legend-row">
       <div class="legend-color" style="background:#00c853"></div>
@@ -82,10 +94,9 @@
     </div>
   </div>
 
-  <!-- 📌 ROUTE SUMMARY BOX -->
   <div id="route-summary" class="route-summary hidden">
     <h3 style="margin:0; font-size:15px;">📍 ملخص الجولة</h3>
-    <p id="summary-text" style="margin:6px 0 0 0;">—</p>
+    <div id="summary-text">—</div>
   </div>
 
 </body>
