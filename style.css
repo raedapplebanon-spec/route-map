@@ -11,6 +11,29 @@ html, body {
   width: 100%;
 }
 
+/* ⭐ Search Box Styling */
+#pac-input {
+  background-color: #fff;
+  font-family: 'Segoe UI', Tahoma, sans-serif;
+  font-size: 15px;
+  font-weight: 400;
+  margin-top: 10px;
+  padding: 0 12px;
+  text-overflow: ellipsis;
+  width: 260px; /* Adjust width as needed */
+  height: 40px;
+  border-radius: 8px;
+  border: 1px solid #ddd;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.2);
+  outline: none;
+  direction: rtl; /* Supports Arabic search */
+  z-index: 1000;
+}
+
+#pac-input:focus {
+  border-color: #4d90fe;
+}
+
 /* Legend box */
 .legend {
   position: absolute;
@@ -21,6 +44,7 @@ html, body {
   border-radius: 8px;
   font-size: 12px;
   box-shadow: 0 2px 6px rgba(0,0,0,0.25);
+  z-index: 1000;
 }
 
 .legend-row {
