@@ -58,17 +58,15 @@ function updateRouteSummary(km, minutes) {
 }
 
 async function initMap() {
-  // 1. Import libraries
   const { Map } = await google.maps.importLibrary("maps");
-  // We access ControlPosition directly from the google.maps namespace to avoid 'undefined' error
-  const ControlPosition = google.maps.ControlPosition; 
-  
   const { AdvancedMarkerElement, PinElement } = await google.maps.importLibrary("marker");
   const { SearchBox } = await google.maps.importLibrary("places");
 
+  // Fix: Access ControlPosition from the main google.maps object
+  const ControlPosition = google.maps.ControlPosition;
+
   infoWindow = new google.maps.InfoWindow();
 
-  // 2. Initialize Map
   map = new Map(document.getElementById("map"), {
     center: { lat: 32.028031, lng: 35.704308 },
     zoom: 13,
@@ -77,23 +75,24 @@ async function initMap() {
     streetViewControl: true,
   });
 
-  // 3. Search Logic
+  // --- Search Logic ---
   const input = document.getElementById("pac-input");
   const searchBox = new SearchBox(input);
-  
-  // Position the search box on the map
+
+  // Use a safety check to prevent the crash
   if (ControlPosition && ControlPosition.TOP_LEFT) {
-      map.controls[ControlPosition.TOP_LEFT].push(input);
+    map.controls[ControlPosition.TOP_LEFT].push(input);
+  } else {
+    console.error("Could not find ControlPosition. Check your API version.");
   }
 
   searchBox.addListener("places_changed", () => {
     const query = input.value.trim().toLowerCase();
     if (!query) return;
 
-    // Search locally in our students first
     const allMarkers = [...routeMarkers, ...availableMarkers];
     const found = allMarkers.find(m => 
-      m.names && m.names.some(name => name.toLowerCase().includes(query))
+      m.names.some(name => name.toLowerCase().includes(query))
     );
 
     if (found) {
@@ -102,7 +101,6 @@ async function initMap() {
       infoWindow.setContent(found.html);
       infoWindow.open(map, found.marker);
     } else {
-      // Standard Google Places search
       const places = searchBox.getPlaces();
       if (!places || places.length === 0) return;
       const bounds = new google.maps.LatLngBounds();
@@ -115,7 +113,7 @@ async function initMap() {
     }
   });
 
-  // 4. Directions Setup (This part was failing because of the error above)
+  // This part will now run because the crash above is fixed!
   directionsService = new google.maps.DirectionsService();
   directionsRenderer = new google.maps.DirectionsRenderer({
     map: map,
@@ -250,4 +248,5 @@ function calculateRoadRoute(clusters) {
 
 window.initMap = initMap;
 window.setRouteData = setRouteData;
+
 
