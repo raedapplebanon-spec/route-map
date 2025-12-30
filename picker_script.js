@@ -1,19 +1,27 @@
 let map;
 let marker;
+let infoWindow;
+let geocoder;
 
 async function initPickerMap() {
-  const { Map, ControlPosition } = await google.maps.importLibrary("maps");
+  const { Map } = await google.maps.importLibrary("maps");
   const { AdvancedMarkerElement } = await google.maps.importLibrary("marker");
   const { SearchBox } = await google.maps.importLibrary("places");
+  const { Geocoder } = await google.maps.importLibrary("geocoding");
+
+  const ControlPosition = google.maps.ControlPosition;
+  geocoder = new Geocoder();
 
   // Initialize Map
   map = new Map(document.getElementById("map"), {
     center: { lat: 32.028, lng: 35.704 },
     zoom: 15,
-    mapId: "48c2bb983bd19c1c44d95cb7", // Reusing your Map ID
+    mapId: "48c2bb983bd19c1c44d95cb7",
+    streetViewControl: false,
+    mapTypeControl: true,
   });
 
-  // 1. Create a Draggable Marker
+  // Create the Picker Marker
   marker = new AdvancedMarkerElement({
     map: map,
     position: { lat: 32.028, lng: 35.704 },
@@ -21,11 +29,14 @@ async function initPickerMap() {
     title: "اسحب لتحديد الموقع"
   });
 
-  // 2. Search Box logic
+  // Setup Search Box
   const input = document.getElementById("pac-input");
   const searchBox = new SearchBox(input);
   map.controls[ControlPosition.TOP_LEFT].push(input);
 
+  // --- EVENTS ---
+
+  // A. Search box selection
   searchBox.addListener("places_changed", () => {
     const places = searchBox.getPlaces();
     if (places.length === 0) return;
@@ -35,38 +46,49 @@ async function initPickerMap() {
     sendToFlutter(pos.lat(), pos.lng());
   });
 
-  // 3. Update position when dragged
+  // B. Dragging the pin
   marker.addListener("dragend", () => {
     const pos = marker.position;
+    reverseGeocode(pos);
     sendToFlutter(pos.lat, pos.lng);
   });
 
-  // 4. Update position when map is clicked
+  // C. Clicking the map to teleport the pin
   map.addListener("click", (e) => {
     const pos = e.latLng;
     marker.position = pos;
+    reverseGeocode(pos);
     sendToFlutter(pos.lat(), pos.lng());
+  });
+}
+
+// Optional: Turn coordinates into a readable address in the search bar
+function reverseGeocode(latLng) {
+  geocoder.geocode({ location: latLng }, (results, status) => {
+    if (status === "OK" && results[0]) {
+      document.getElementById("pac-input").value = results[0].formatted_address;
+    }
   });
 }
 
 function sendToFlutter(lat, lng) {
   const data = { action: "locationPicked", lat: lat, lng: lng };
+  console.log("📍 Sending to Flutter:", data);
   
-  // Detect Windows WebView
   if (window.FlutterChan) {
     window.FlutterChan.postMessage(JSON.stringify(data));
-  } 
-  // Detect Web IFrame
-  else {
+  } else {
     window.parent.postMessage(data, "*");
   }
 }
 
-// Listener for initial position from Flutter
+// Initial position from Flutter
 window.addEventListener("message", (event) => {
   if (event.data.action === "setInitialPos") {
     const pos = { lat: event.data.lat, lng: event.data.lng };
-    map.setCenter(pos);
-    marker.position = pos;
+    if (map && marker) {
+        map.setCenter(pos);
+        marker.position = pos;
+    }
   }
 });
