@@ -70,9 +70,7 @@ async function initMap() {
     zoom: 13,
     mapId: MY_MAP_ID,
     mapTypeControl: true,     
-    streetViewControl: true, 
-    mapTypeControl: false,
-    streetViewControl: false,
+    streetViewControl: true,
   });
 
   directionsService = new google.maps.DirectionsService();
@@ -217,5 +215,6 @@ function calculateRoadRoute(clusters) {
 
 window.initMap = initMap;
 window.setRouteData = setRouteData;
+
 
 
