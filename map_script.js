@@ -69,6 +69,8 @@ async function initMap() {
     center: { lat: 32.028031, lng: 35.704308 },
     zoom: 13,
     mapId: MY_MAP_ID,
+    mapTypeControl: true,     
+    streetViewControl: true, 
     mapTypeControl: false,
     streetViewControl: false,
   });
@@ -215,4 +217,5 @@ function calculateRoadRoute(clusters) {
 
 window.initMap = initMap;
 window.setRouteData = setRouteData;
+
 
