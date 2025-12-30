@@ -17,7 +17,10 @@ function haversineDistance(lat1, lng1, lat2, lng2) {
   return 2 * R * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
-function groupCloseLocations(stops, tolerance = 5) {
+/**
+ * ⭐ YOUR UPDATED CLUSTERING LOGIC
+ */
+function groupCloseLocations(stops, tolerance = 15) {
   const clusters = [];
   stops.forEach(stop => {
     let placed = false;
@@ -25,6 +28,11 @@ function groupCloseLocations(stops, tolerance = 5) {
       const d = haversineDistance(c.lat, c.lng, parseFloat(stop.lat), parseFloat(stop.lng));
       if (d < tolerance) {
         c.items.push(stop);
+        // If any item is start/final, the whole cluster inherits it
+        if (stop.isStart === true) c.isStart = true;
+        if (stop.isFinal === true) c.isFinal = true;
+        // Cluster stays hidden only if ALL items are hidden
+        c.hideMarker = c.hideMarker && (stop.hideMarker === true || stop.hideMarker === 'true');
         placed = true;
         break;
       }
@@ -98,7 +106,6 @@ function setRouteData(routeArray, availableArray) {
   const infoWindow = new google.maps.InfoWindow();
 
   const addMarker = (pos, title, html, color, text) => {
-    // ⭐ UPDATED: Using glyphText instead of glyph
     const pin = new google.maps.marker.PinElement({
       background: color,
       borderColor: "#FFFFFF",
@@ -133,7 +140,7 @@ function setRouteData(routeArray, availableArray) {
     let initialText = cluster.isStart ? "S" : (cluster.isFinal ? "E" : "...");
 
     let html = `<div style="color:black;text-align:right;direction:rtl;min-width:150px;">`;
-    html += `<b style="color:${color};">محطة توقف</b><hr style="margin:5px 0;">`;
+    html += `<b style="color:${color};">${cluster.isStart ? "نقطة البداية" : (cluster.isFinal ? "نقطة النهاية" : "محطة توقف")}</b><hr style="margin:5px 0;">`;
     cluster.items.forEach(x => { 
       let name = x.studentName || x.label || "طالب";
       html += `<div style="margin-bottom:4px;">• <b>${name}</b></div>`; 
@@ -181,23 +188,18 @@ function calculateRoadRoute(clusters) {
   }, (result, status) => {
     if (status === "OK") {
       directionsRenderer.setDirections(result);
-      
       const optimizedOrder = result.routes[0].waypoint_order; 
       optimizedOrder.forEach((originalIndex, stepIndex) => {
         const clusterData = waypointClusters[originalIndex];
         const stopNum = (stepIndex + 1).toString();
-
         const markerObj = routeMarkers.find(m => 
           Math.abs(m.lat - clusterData.lat) < 0.0001 && 
           Math.abs(m.lng - clusterData.lng) < 0.0001
         );
-
         if (markerObj) {
-          // ⭐ UPDATED: Using glyphText instead of glyph
           markerObj.pin.glyphText = stopNum;
         }
       });
-
       const route = result.routes[0];
       let dist = 0, dur = 0;
       route.legs.forEach(leg => { dist += leg.distance.value; dur += leg.duration.value; });
