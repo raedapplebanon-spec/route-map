@@ -9,19 +9,16 @@
   <script src="https://raedapplebanon-spec.github.io/route-map/map_script.js?v=6"></script>
 
   <script
-    src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCYaJ4Gjq36mq8swYgjNXOYr5mKZi45niA&callback=initMap&libraries=marker&v=beta"
+    src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCYaJ4Gjq36mq8swYgjNXOYr5mKZi45niA&callback=initMap&libraries=marker,places&v=beta"
     async defer>
   </script>
 
   <script>
     window.addEventListener("message", function (event) {
       if (!event.data || event.data.action !== "setRouteData") return;
-
       const routeData = event.data.routeData || [];
       const availableData = event.data.availableData || [];
-
       console.log("📩 Received from Flutter:", routeData, availableData);
-
       if (window.setRouteData) {
         window.setRouteData(routeData, availableData);
       } else {
@@ -31,10 +28,29 @@
   </script>
 
   <style>
-    /* Final Styling for the Route Summary */
+    /* ⭐ Search Box Styling */
+    #pac-input {
+      background-color: #fff;
+      font-family: 'Segoe UI', Arial, sans-serif;
+      font-size: 15px;
+      font-weight: 400;
+      margin: 10px;
+      padding: 0 15px;
+      text-overflow: ellipsis;
+      width: 280px;
+      height: 45px;
+      border-radius: 8px;
+      border: 1px solid #ddd;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+      direction: rtl;
+      outline: none;
+      z-index: 10;
+    }
+    #pac-input:focus { border-color: #1a73e8; }
+
     .route-summary {
       position: absolute;
-      bottom: 25px; /* Shifted up to clear the Google logo */
+      bottom: 25px;
       left: 15px;
       background: white;
       padding: 14px 18px;
@@ -48,31 +64,19 @@
       min-width: 160px;
       border: 1px solid #eee;
     }
-
     .route-summary h3 {
       color: #1a73e8;
       border-bottom: 1px solid #eee;
       padding-bottom: 5px;
       margin-bottom: 8px;
     }
-
-    .hidden {
-      display: none;
-    }
-
-    /* Ensure legend and summary don't overlap on very small screens */
-    @media (max-width: 400px) {
-      .route-summary {
-        font-size: 12px;
-        padding: 10px;
-        bottom: 15px;
-        left: 10px;
-      }
-    }
+    .hidden { display: none; }
   </style>
 </head>
 
 <body>
+  <input id="pac-input" class="controls" type="text" placeholder="ابحث عن عنوان أو اسم طالب...">
+  
   <div id="map"></div>
 
   <div class="legend">
@@ -98,6 +102,5 @@
     <h3 style="margin:0; font-size:15px;">📍 ملخص الجولة</h3>
     <div id="summary-text">—</div>
   </div>
-
 </body>
 </html>
