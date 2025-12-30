@@ -5,6 +5,7 @@ let directionsService;
 let directionsRenderer;
 let mapReady = false;
 let pendingData = null;
+let isFirstLoad = true;
 
 const MY_MAP_ID = "48c2bb983bd19c1c44d95cb7";
 
@@ -168,8 +169,12 @@ function setRouteData(routeArray, availableArray) {
   if (routeClusters.length >= 2) {
     calculateRoadRoute(routeClusters);
   }
+  if (!bounds.isEmpty() && isFirstLoad) {
+    map.fitBounds(bounds);
+    isFirstLoad = false;
+  }
 
-  if (!bounds.isEmpty()) map.fitBounds(bounds);
+ 
 }
 
 function calculateRoadRoute(clusters) {
@@ -210,3 +215,4 @@ function calculateRoadRoute(clusters) {
 
 window.initMap = initMap;
 window.setRouteData = setRouteData;
+
