@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <title>Location Picker</title>
+  <style>
+    html, body, #map { height: 100%; margin: 0; padding: 0; }
+    #pac-input {
+      background-color: #fff;
+      padding: 0 15px;
+      width: 300px;
+      height: 45px;
+      border-radius: 8px;
+      border: 1px solid #ddd;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+      margin-top: 10px;
+      font-family: sans-serif;
+      outline: none;
+    }
+  </style>
+</head>
+<body>
+  <input id="pac-input" type="text" placeholder="ابحث عن موقع...">
+  <div id="map"></div>
+
+  <script src="https://maps.googleapis.com/maps/api/js?key=YOUR_API_KEY&libraries=marker,places&callback=initPickerMap" async defer></script>
+  <script src="picker_script.js"></script>
+</body>
+</html>
