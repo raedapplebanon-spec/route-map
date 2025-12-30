@@ -97,12 +97,13 @@ function setRouteData(routeArray, availableArray) {
   const bounds = new google.maps.LatLngBounds();
   const infoWindow = new google.maps.InfoWindow();
 
-  const addMarker = (pos, title, html, color, glyphText) => {
+  const addMarker = (pos, title, html, color, text) => {
+    // ⭐ UPDATED: Using glyphText instead of glyph
     const pin = new google.maps.marker.PinElement({
       background: color,
       borderColor: "#FFFFFF",
       glyphColor: "#FFFFFF",
-      glyph: glyphText
+      glyphText: text 
     });
 
     const marker = new google.maps.marker.AdvancedMarkerElement({
@@ -129,17 +130,17 @@ function setRouteData(routeArray, availableArray) {
     bounds.extend(pos);
 
     let color = cluster.isStart ? "#00c853" : (cluster.isFinal ? "#d50000" : "#1a73e8");
-    let initialGlyph = cluster.isStart ? "S" : (cluster.isFinal ? "E" : "...");
+    let initialText = cluster.isStart ? "S" : (cluster.isFinal ? "E" : "...");
 
-    let html = `<div id="info-${cluster.lat}-${cluster.lng}" style="color:black;text-align:right;direction:rtl;min-width:150px;">`;
-    html += `<b class="stop-title" style="color:${color};">محطة توقف</b><hr style="margin:5px 0;">`;
+    let html = `<div style="color:black;text-align:right;direction:rtl;min-width:150px;">`;
+    html += `<b style="color:${color};">محطة توقف</b><hr style="margin:5px 0;">`;
     cluster.items.forEach(x => { 
       let name = x.studentName || x.label || "طالب";
       html += `<div style="margin-bottom:4px;">• <b>${name}</b></div>`; 
     });
     html += `</div>`;
 
-    const markerObj = addMarker(pos, "route", html, color, initialGlyph);
+    const markerObj = addMarker(pos, "route", html, color, initialText);
     routeMarkers.push({ ...markerObj, lat: cluster.lat, lng: cluster.lng });
   });
 
@@ -186,16 +187,14 @@ function calculateRoadRoute(clusters) {
         const clusterData = waypointClusters[originalIndex];
         const stopNum = (stepIndex + 1).toString();
 
-        // Use a tiny epsilon (0.0001) to find the marker even if coordinates shifted slightly
         const markerObj = routeMarkers.find(m => 
           Math.abs(m.lat - clusterData.lat) < 0.0001 && 
           Math.abs(m.lng - clusterData.lng) < 0.0001
         );
 
         if (markerObj) {
-          markerObj.pin.glyph = stopNum;
-          // Also update the title in the HTML if infoWindow opens
-          markerObj.marker.title = "محطة رقم " + stopNum;
+          // ⭐ UPDATED: Using glyphText instead of glyph
+          markerObj.pin.glyphText = stopNum;
         }
       });
 
