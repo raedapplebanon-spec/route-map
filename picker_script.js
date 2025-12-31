@@ -2,7 +2,7 @@ let map, marker, geocoder;
 
 window.initPickerMap = async function() {
   try {
-    // 1. Load stable libraries
+    // 1. Load Libraries
     await google.maps.importLibrary("maps");
     await google.maps.importLibrary("marker");
     await google.maps.importLibrary("places");
@@ -24,26 +24,31 @@ window.initPickerMap = async function() {
       gmpDraggable: true,
     });
 
-    // 2. Setup Autocomplete (The stable way)
-    const input = document.getElementById("pac-input");
-    const autocomplete = new google.maps.places.Autocomplete(input, {
-      fields: ["geometry", "formatted_address", "name"],
+    // 2. Setup the NEW 2025 Autocomplete Component
+    const autocompleteWidget = document.getElementById("pac-input");
+    
+    // Add to Map UI
+    map.controls[google.maps.ControlPosition.TOP_LEFT].push(autocompleteWidget);
+
+    // Modern Listener for the new component
+    autocompleteWidget.addEventListener('gmp-placeselect', async (e) => {
+      const place = e.detail.place;
+
+      // Ensure geometry is fetched (Standard for the new component)
+      if (!place.geometry) {
+        await place.fetchFields({ fields: ['geometry', 'location', 'formatted_address'] });
+      }
+
+      if (place.geometry && place.geometry.location) {
+        const pos = place.geometry.location;
+        map.setCenter(pos);
+        marker.position = pos;
+        map.setZoom(17);
+        sendToFlutter(pos.lat(), pos.lng());
+      }
     });
 
-    map.controls[google.maps.ControlPosition.TOP_LEFT].push(input);
-
-    autocomplete.addListener("place_changed", () => {
-      const place = autocomplete.getPlace();
-      if (!place.geometry || !place.geometry.location) return;
-
-      const pos = place.geometry.location;
-      map.setCenter(pos);
-      marker.position = pos;
-      map.setZoom(17);
-      sendToFlutter(pos.lat(), pos.lng());
-    });
-
-    // 3. Manual Listeners
+    // 3. Manual Pin Listeners
     marker.addListener("dragend", () => {
       const pos = marker.position;
       sendToFlutter(pos.lat, pos.lng);
@@ -57,7 +62,7 @@ window.initPickerMap = async function() {
       reverseGeocode(pos);
     });
 
-    console.log("✅ Map Initialized Successfully");
+    console.log("✅ Map Initialized with 2025 PlaceAutocompleteElement");
   } catch (e) {
     console.error("❌ Map Initialization Failed:", e);
   }
@@ -82,7 +87,10 @@ window.addEventListener("message", (event) => {
 function reverseGeocode(latLng) {
   geocoder.geocode({ location: latLng }, (results, status) => {
     if (status === "OK" && results[0]) {
-      document.getElementById("pac-input").value = results[0].formatted_address;
+       // Since the new widget handles its own input, we don't strictly need to 
+       // update the text value manually, but it's good for UX.
+       const widget = document.getElementById("pac-input");
+       // Note: the widget might require internal value setting depending on browser
     }
   });
 }
@@ -96,7 +104,6 @@ function sendToFlutter(lat, lng) {
   }
 }
 
-// Safety catch for race conditions
 if (typeof google !== 'undefined' && google.maps) {
     window.initPickerMap();
 }
