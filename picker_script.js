@@ -1,10 +1,8 @@
 let map, marker, geocoder;
 
-// 1. ATTACH IMMEDIATELY: Using this syntax ensures the function is on the window 
-// before the rest of the script even finishes executing.
 window.initPickerMap = async function() {
   try {
-    // Load Libraries
+    // 1. Load Libraries (Added 'places' is still required)
     await google.maps.importLibrary("maps");
     await google.maps.importLibrary("marker");
     await google.maps.importLibrary("places");
@@ -18,6 +16,7 @@ window.initPickerMap = async function() {
       center: defaultPos,
       zoom: 15,
       mapId: "48c2bb983bd19c1c44d95cb7",
+      streetViewControl: false, // Optional: keeps UI clean
     });
 
     marker = new google.maps.marker.AdvancedMarkerElement({
@@ -27,7 +26,7 @@ window.initPickerMap = async function() {
       title: "اسحب الدبوس لتحديد الموقع"
     });
 
-    // --- LISTENERS ---
+    // --- MARKER LISTENERS ---
     marker.addListener("dragend", () => {
       const pos = marker.position;
       sendToFlutter(pos.lat, pos.lng);
@@ -41,26 +40,45 @@ window.initPickerMap = async function() {
       reverseGeocode(pos);
     });
 
+    // --- NEW AUTOCOMPLETE SETUP (Replaces SearchBox) ---
     const input = document.getElementById("pac-input");
-    const searchBox = new google.maps.places.SearchBox(input);
+    
+    // Autocomplete is more modern and provides better suggestions
+    const autocomplete = new google.maps.places.Autocomplete(input, {
+      fields: ["geometry", "formatted_address", "name"],
+      origin: map.getCenter(),
+    });
+
     map.controls[google.maps.ControlPosition.TOP_LEFT].push(input);
 
-    searchBox.addListener("places_changed", () => {
-      const places = searchBox.getPlaces();
-      if (places.length === 0) return;
-      const pos = places[0].geometry.location;
+    // Bind autocomplete to map bounds so it searches nearby first
+    autocomplete.bindTo("bounds", map);
+
+    autocomplete.addListener("place_changed", () => {
+      const place = autocomplete.getPlace();
+      
+      if (!place.geometry || !place.geometry.location) {
+        console.log("No details available for input: '" + place.name + "'");
+        return;
+      }
+
+      const pos = place.geometry.location;
       map.setCenter(pos);
       marker.position = pos;
+      
+      // Update the input text to the clean formatted address
+      input.value = place.formatted_address || place.name;
+      
       sendToFlutter(pos.lat(), pos.lng());
     });
 
-    console.log("✅ Map Initialized Successfully");
+    console.log("✅ Map Initialized with Autocomplete Successfully");
   } catch (e) {
     console.error("❌ Map Initialization Failed:", e);
   }
 };
 
-// 2. THE EDIT HANDLER (Stays outside)
+// 2. THE EDIT HANDLER
 window.addEventListener("message", (event) => {
   if (event.data.action === "setInitialPos") {
     const lat = parseFloat(event.data.lat);
@@ -93,8 +111,6 @@ function sendToFlutter(lat, lng) {
   }
 }
 
-// 3. SAFETY TRIGGER: If Google Maps finished loading before this script was ready,
-// it might have missed the "callback". This forces it to run.
 if (typeof google !== 'undefined' && google.maps) {
     window.initPickerMap();
 }
