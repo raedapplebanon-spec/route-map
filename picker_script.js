@@ -1,85 +1,74 @@
 let map;
 let marker;
 let geocoder;
+let isReady = false; // The Gate
 
 async function initPickerMap() {
-  // 1. Properly await the libraries
   await google.maps.importLibrary("maps");
   await google.maps.importLibrary("marker");
   await google.maps.importLibrary("places");
   await google.maps.importLibrary("geocoding");
 
-  const Map = google.maps.Map;
-  const AdvancedMarkerElement = google.maps.marker.AdvancedMarkerElement;
-  const SearchBox = google.maps.places.SearchBox;
-  const ControlPosition = google.maps.ControlPosition;
+  const { Map, ControlPosition } = google.maps;
+  const { AdvancedMarkerElement } = google.maps.marker;
+  const { SearchBox } = google.maps.places;
   geocoder = new google.maps.Geocoder();
 
-  // 2. Initialize Map
   map = new Map(document.getElementById("map"), {
-    center: { lat: 32.028, lng: 35.704 },
-    zoom: 16,
+    center: { lat: 32.028, lng: 35.704 }, // Default to Jordan, not the ocean
+    zoom: 15,
     mapId: "48c2bb983bd19c1c44d95cb7",
-    streetViewControl: false,
-    mapTypeControl: true,
   });
 
-  // 3. Create the Marker (Center-Locked Style)
   marker = new AdvancedMarkerElement({
     map: map,
     position: map.getCenter(),
-    title: "الموقع المختار"
   });
 
-  // --- Center-Locked Logic ---
-  // Marker follows map center
   map.addListener("center_changed", () => {
     marker.position = map.getCenter();
   });
 
-  // When map stops moving, send data to Flutter
   map.addListener("idle", () => {
+    // ONLY send to Flutter if the map is "Ready" (after initial position is loaded)
+    if (!isReady) return; 
+
     const pos = map.getCenter();
     reverseGeocode(pos);
     sendToFlutter(pos.lat(), pos.lng());
   });
 
-  // 4. Setup Search Box
   const input = document.getElementById("pac-input");
   const searchBox = new SearchBox(input);
-  if (ControlPosition && ControlPosition.TOP_LEFT) {
-    map.controls[ControlPosition.TOP_LEFT].push(input);
-  }
+  map.controls[ControlPosition.TOP_LEFT].push(input);
 
   searchBox.addListener("places_changed", () => {
     const places = searchBox.getPlaces();
     if (places.length === 0) return;
-    const pos = places[0].geometry.location;
-    map.setCenter(pos); // Map moves, and marker follows via center_changed
+    map.setCenter(places[0].geometry.location);
   });
 }
 
-// 5. EDIT MODE: Listen for initial position from Flutter
+// EDIT MODE: Receive initial position
 window.addEventListener("message", (event) => {
   if (event.data.action === "setInitialPos") {
     const pos = { 
         lat: parseFloat(event.data.lat), 
         lng: parseFloat(event.data.lng) 
     };
+    
+    // If coordinates are 0 or null, don't move (prevents ocean bug)
+    if (!pos.lat || pos.lat === 0) return;
+
     if (map) {
       map.setCenter(pos);
-      map.setZoom(18); // Zoom in closer for editing
+      map.setZoom(17);
+      
+      // Open the gate! Now the user can move the map and updates will send
+      setTimeout(() => { isReady = true; }, 1000); 
     }
   }
 });
-
-function reverseGeocode(latLng) {
-  geocoder.geocode({ location: latLng }, (results, status) => {
-    if (status === "OK" && results[0]) {
-      document.getElementById("pac-input").value = results[0].formatted_address;
-    }
-  });
-}
 
 function sendToFlutter(lat, lng) {
   const data = { action: "locationPicked", lat: lat, lng: lng };
@@ -89,6 +78,3 @@ function sendToFlutter(lat, lng) {
     window.parent.postMessage(data, "*");
   }
 }
-
-// Ensure the callback is globally available
-window.initPickerMap = initPickerMap;
