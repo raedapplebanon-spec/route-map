@@ -1,80 +1,101 @@
-let map;
-let marker;
-let geocoder;
-let isReady = false; // The Gate
+let map, marker, geocoder;
 
 async function initPickerMap() {
+  // 1. Load Libraries
   await google.maps.importLibrary("maps");
   await google.maps.importLibrary("marker");
   await google.maps.importLibrary("places");
   await google.maps.importLibrary("geocoding");
 
-  const { Map, ControlPosition } = google.maps;
-  const { AdvancedMarkerElement } = google.maps.marker;
-  const { SearchBox } = google.maps.places;
   geocoder = new google.maps.Geocoder();
 
-  map = new Map(document.getElementById("map"), {
-    center: { lat: 32.028, lng: 35.704 }, // Default to Jordan, not the ocean
+  // 2. Initialize at your default location (Salt, Jordan)
+  const defaultPos = { lat: 32.0280, lng: 35.7043 };
+  
+  map = new google.maps.Map(document.getElementById("map"), {
+    center: defaultPos,
     zoom: 15,
     mapId: "48c2bb983bd19c1c44d95cb7",
   });
 
-  marker = new AdvancedMarkerElement({
+  // 3. Create the Draggable Pin
+  marker = new google.maps.marker.AdvancedMarkerElement({
     map: map,
-    position: map.getCenter(),
+    position: defaultPos,
+    gmpDraggable: true,
+    title: "اسحب الدبوس لتحديد الموقع"
   });
 
-  map.addListener("center_changed", () => {
-    marker.position = map.getCenter();
-  });
+  // --- ACTIONS ---
 
-  map.addListener("idle", () => {
-    // ONLY send to Flutter if the map is "Ready" (after initial position is loaded)
-    if (!isReady) return; 
-
-    const pos = map.getCenter();
+  // When user stops dragging
+  marker.addListener("dragend", () => {
+    const pos = marker.position;
+    sendToFlutter(pos.lat, pos.lng);
     reverseGeocode(pos);
-    sendToFlutter(pos.lat(), pos.lng());
   });
 
+  // When user clicks the map to "teleport" the pin
+  map.addListener("click", (e) => {
+    const pos = e.latLng;
+    marker.position = pos;
+    sendToFlutter(pos.lat(), pos.lng());
+    reverseGeocode(pos);
+  });
+
+  // 4. Search Box Setup
   const input = document.getElementById("pac-input");
-  const searchBox = new SearchBox(input);
-  map.controls[ControlPosition.TOP_LEFT].push(input);
+  const searchBox = new google.maps.places.SearchBox(input);
+  map.controls[google.maps.ControlPosition.TOP_LEFT].push(input);
 
   searchBox.addListener("places_changed", () => {
     const places = searchBox.getPlaces();
     if (places.length === 0) return;
-    map.setCenter(places[0].geometry.location);
+    const pos = places[0].geometry.location;
+    map.setCenter(pos);
+    marker.position = pos;
+    sendToFlutter(pos.lat(), pos.lng());
   });
 }
 
-// EDIT MODE: Receive initial position
+// 5. THE EDIT HANDLER: Listen for existing coordinates from Flutter
 window.addEventListener("message", (event) => {
   if (event.data.action === "setInitialPos") {
-    const pos = { 
-        lat: parseFloat(event.data.lat), 
-        lng: parseFloat(event.data.lng) 
-    };
-    
-    // If coordinates are 0 or null, don't move (prevents ocean bug)
-    if (!pos.lat || pos.lat === 0) return;
+    const lat = parseFloat(event.data.lat);
+    const lng = parseFloat(event.data.lng);
 
-    if (map) {
-      map.setCenter(pos);
-      map.setZoom(17);
-      
-      // Open the gate! Now the user can move the map and updates will send
-      setTimeout(() => { isReady = true; }, 1000); 
+    // If coordinates are 0, null, or invalid, ignore them (prevents ocean bug)
+    if (lat && lat !== 0) {
+      const pos = { lat, lng };
+      if (map && marker) {
+        map.setCenter(pos);
+        marker.position = pos;
+        map.setZoom(17);
+        console.log("📍 Edit Mode: Map jumped to existing location.");
+      }
     }
   }
 });
 
+function reverseGeocode(latLng) {
+  geocoder.geocode({ location: latLng }, (results, status) => {
+    if (status === "OK" && results[0]) {
+      document.getElementById("pac-input").value = results[0].formatted_address;
+    }
+  });
+}
+
 function sendToFlutter(lat, lng) {
   const data = { action: "locationPicked", lat: lat, lng: lng };
+  // Windows Support
   if (window.FlutterChan) {
     window.FlutterChan.postMessage(JSON.stringify(data));
-  } else {
+  } 
+  // Web Support
+  else {
     window.parent.postMessage(data, "*");
   }
 }
+
+// Global assignment for the callback
+window.initPickerMap = initPickerMap;
