@@ -128,6 +128,7 @@ async function initMap() {
     pendingData = null;
   }
 }
+
 function setRouteData(routeArray, availableArray) {
   if (!mapReady) {
     pendingData = { route: routeArray, available: availableArray };
@@ -217,8 +218,12 @@ function calculateRoadRoute(clusters) {
   const endStop = clusters.find(c => c.isFinal);
   if (!startStop || !endStop) return;
 
-  // ✅ All middle clusters are waypoints (students + assistant + extra stops)
-  const waypointClusters = clusters.filter(c => !c.isStart && !c.isFinal);
+  // ✅ ONLY clusters that contain at least one student are optimized
+  const waypointClusters = clusters.filter(c =>
+    !c.isStart &&
+    !c.isFinal &&
+    c.items.some(x => x.stopType === "student")
+  );
 
   directionsService.route({
     origin: { lat: startStop.lat, lng: startStop.lng },
@@ -262,7 +267,3 @@ function calculateRoadRoute(clusters) {
 
 window.initMap = initMap;
 window.setRouteData = setRouteData;
-
-
-
-
