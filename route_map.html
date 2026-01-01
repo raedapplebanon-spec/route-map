@@ -1,68 +1,211 @@
-<!DOCTYPE html>
+ <!DOCTYPE html>
+
 <html lang="ar" dir="rtl">
+
 <head>
+
   <meta charset="UTF-8" />
+
   <title>Route Map</title>
 
+
+
   <link rel="stylesheet" href="https://raedapplebanon-spec.github.io/route-map/style.css?v=3" />
-  
-  <style>
-    /* Your CSS remains exactly as you wrote it */
-    #map { height: 100vh; width: 100%; } /* Ensure map has height! */
-    #pac-input { ... }
-    .route-summary { ... }
-    .hidden { display: none; }
-    /* ... rest of your styles ... */
-  </style>
-</head>
 
-<body>
-  <input id="pac-input" class="controls" type="text" placeholder="ابحث عن عنوان أو اسم طالب...">
   
-  <div id="map"></div>
-
-  <div class="legend">...</div>
-  <div id="route-summary" class="route-summary hidden">
-    <h3 style="margin:0; font-size:15px;">📍 ملخص الجولة</h3>
-    <div id="summary-text">—</div>
-  </div>
 
   <script src="https://raedapplebanon-spec.github.io/route-map/map_script.js?v=6"></script>
 
+
+
   <script
+
     src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCYaJ4Gjq36mq8swYgjNXOYr5mKZi45niA&callback=initMap&libraries=marker,places&v=beta"
+
     async defer>
+
   </script>
 
+
+
   <script>
-    // Store data if the script isn't ready yet
-    let pendingData = null;
 
     window.addEventListener("message", function (event) {
-      // Security: Optional check for FlutterFlow domain
+
       if (!event.data || event.data.action !== "setRouteData") return;
 
       const routeData = event.data.routeData || [];
+
       const availableData = event.data.availableData || [];
-      
+
       console.log("📩 Received from Flutter:", routeData, availableData);
 
       if (window.setRouteData) {
+
         window.setRouteData(routeData, availableData);
+
       } else {
-        console.warn("⚠️ setRouteData() not ready yet. Saving data for later.");
-        pendingData = { routeData, availableData };
+
+        console.warn("⚠️ setRouteData() not ready yet");
+
       }
+
     });
 
-    // Check every 500ms if the map script has loaded, then push pending data
-    const checkReady = setInterval(() => {
-      if (window.setRouteData && pendingData) {
-        window.setRouteData(pendingData.routeData, pendingData.availableData);
-        pendingData = null;
-        clearInterval(checkReady);
-      }
-    }, 500);
   </script>
+
+
+
+  <style>
+
+    /* ⭐ Search Box Styling */
+
+    #pac-input {
+
+      background-color: #fff;
+
+      font-family: 'Segoe UI', Arial, sans-serif;
+
+      font-size: 15px;
+
+      font-weight: 400;
+
+      margin: 10px;
+
+      padding: 0 15px;
+
+      text-overflow: ellipsis;
+
+      width: 280px;
+
+      height: 45px;
+
+      border-radius: 8px;
+
+      border: 1px solid #ddd;
+
+      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+
+      direction: rtl;
+
+      outline: none;
+
+      z-index: 10;
+
+    }
+
+    #pac-input:focus { border-color: #1a73e8; }
+
+
+
+    .route-summary {
+
+      position: absolute;
+
+      bottom: 25px;
+
+      left: 15px;
+
+      background: white;
+
+      padding: 14px 18px;
+
+      border-radius: 12px;
+
+      box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+
+      font-size: 14px;
+
+      line-height: 1.5;
+
+      direction: rtl;
+
+      text-align: right;
+
+      z-index: 9999;
+
+      min-width: 160px;
+
+      border: 1px solid #eee;
+
+    }
+
+    .route-summary h3 {
+
+      color: #1a73e8;
+
+      border-bottom: 1px solid #eee;
+
+      padding-bottom: 5px;
+
+      margin-bottom: 8px;
+
+    }
+
+    .hidden { display: none; }
+
+  </style>
+
+</head>
+
+
+
+<body>
+
+  <input id="pac-input" class="controls" type="text" placeholder="ابحث عن عنوان أو اسم طالب...">
+
+  
+
+  <div id="map"></div>
+
+
+
+  <div class="legend">
+
+    <div class="legend-row">
+
+      <div class="legend-color" style="background:#00c853"></div>
+
+      <span>البداية</span>
+
+    </div>
+
+    <div class="legend-row">
+
+      <div class="legend-color" style="background:#d50000"></div>
+
+      <span>النهاية</span>
+
+    </div>
+
+    <div class="legend-row">
+
+      <div class="legend-color" style="background:#1a73e8"></div>
+
+      <span>طلاب داخل الجولة</span>
+
+    </div>
+
+    <div class="legend-row">
+
+      <div class="legend-color" style="background:#ff9100"></div>
+
+      <span>طلاب بدون جولات</span>
+
+    </div>
+
+  </div>
+
+
+
+  <div id="route-summary" class="route-summary hidden">
+
+    <h3 style="margin:0; font-size:15px;">📍 ملخص الجولة</h3>
+
+    <div id="summary-text">—</div>
+
+  </div>
+
 </body>
+
 </html>
