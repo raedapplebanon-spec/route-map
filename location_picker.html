@@ -6,14 +6,16 @@
   <style>
     html, body, #map { height: 100%; margin: 0; padding: 0; }
     
-    /* Style the new 2025 component to look like our old search box */
-    gmpx-place-autocomplete {
+    /* Style the component using its ID */
+    #pac-input {
       background-color: #fff;
       width: 300px;
-      padding: 0;
       margin-top: 10px;
       border-radius: 8px;
       box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+      /* Font settings to ensure text looks right */
+      font-family: 'Segoe UI', Arial, sans-serif;
+      font-size: 14px;
     }
   </style>
 
@@ -21,12 +23,12 @@
 </head>
 <body>
 
-  <gmpx-place-autocomplete id="pac-input" placeholder="ابحث عن موقع..."></gmpx-place-autocomplete>
+  <div id="pac-input"></div>
 
   <div id="map"></div>
 
   <script
-    src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCYaJ4Gjq36mq8swYgjNXOYr5mKZi45niA&libraries=marker,places&callback=initPickerMap&loading=async&v=weekly"
+    src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCYaJ4Gjq36mq8swYgjNXOYr5mKZi45niA&libraries=marker,places,geocoding&callback=initPickerMap&loading=async&v=weekly"
     async defer>
   </script>
 </body>
