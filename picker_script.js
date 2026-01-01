@@ -1,5 +1,5 @@
 // --- Globals ---
-let map, marker, geocoder;
+let map, marker, geocoder, autocomplete;
 
 window.initPickerMap = async function() {
   try {
@@ -10,19 +10,20 @@ window.initPickerMap = async function() {
     await google.maps.importLibrary("geocoding");
 
     geocoder = new google.maps.Geocoder();
-    const defaultPos = { lat: 32.0280, lng: 35.7043 };
+    // Default: Amman, Jordan
+    const defaultPos = { lat: 31.9539, lng: 35.9106 };
 
     // 2. Initialize Map
     map = new google.maps.Map(document.getElementById("map"), {
       center: defaultPos,
-      zoom: 15,
+      zoom: 13,
       mapId: "48c2bb983bd19c1c44d95cb7",
       
-      // ✅ LAYOUT CONFIGURATION
-      mapTypeControl: true,
+      // ✅ LAYOUT: Satellite on Right
+      mapTypeControl: true, 
       mapTypeControlOptions: {
           style: google.maps.MapTypeControlStyle.HORIZONTAL_BAR,
-          position: google.maps.ControlPosition.TOP_RIGHT // Satellite button goes to Right
+          position: google.maps.ControlPosition.TOP_RIGHT
       },
       streetViewControl: false,
       fullscreenControl: false
@@ -35,39 +36,38 @@ window.initPickerMap = async function() {
       gmpDraggable: true
     });
 
-    // 4. SETUP SEARCH POSITION
-    const searchBar = document.getElementById("pac-input");
+    // 4. SETUP SEARCH (Standard Method)
+    const input = document.getElementById("pac-input");
     
-    // ✅ Search bar goes to Left (Cleanly inside the map)
-    map.controls[google.maps.ControlPosition.TOP_LEFT].push(searchBar);
+    // ➤ Push Search Bar to Top Left (Inside the map)
+    map.controls[google.maps.ControlPosition.TOP_LEFT].push(input);
 
-    // 5. SEARCH LISTENER (THE JUMP FIX)
-    searchBar.addEventListener('gmp-placeselect', async ({ detail }) => {
-      const place = detail.place;
-      
-      if (!place) return;
+    // Connect logic
+    autocomplete = new google.maps.places.Autocomplete(input);
+    autocomplete.bindTo("bounds", map);
 
-      // Force fetch the 'location' field
-      await place.fetchFields({ 
-        fields: ['location', 'viewport', 'formattedAddress'] 
-      });
+    // 5. SEARCH LISTENER (The Jump)
+    autocomplete.addListener("place_changed", () => {
+      const place = autocomplete.getPlace();
 
-      // Verification Log
-      console.log("📍 Jump to:", place.location);
+      if (!place.geometry || !place.geometry.location) {
+        window.alert("No details available for input: '" + place.name + "'");
+        return;
+      }
 
-      // A. JUMP TO LOCATION
-      if (place.viewport) {
-        map.fitBounds(place.viewport);
-      } else if (place.location) {
-        map.setCenter(place.location);
+      // A. Move Map
+      if (place.geometry.viewport) {
+        map.fitBounds(place.geometry.viewport);
+      } else {
+        map.setCenter(place.geometry.location);
         map.setZoom(17);
       }
 
-      // B. MOVE MARKER
-      if (place.location) {
-          marker.position = place.location;
-          sendToFlutter(place.location.lat, place.location.lng);
-      }
+      // B. Move Marker
+      marker.position = place.geometry.location;
+
+      // C. Send Data
+      sendToFlutter(place.geometry.location.lat(), place.geometry.location.lng());
     });
 
     // 6. DRAG LISTENER
@@ -84,11 +84,11 @@ window.initPickerMap = async function() {
     console.log("✅ Map Initialized");
 
   } catch (e) {
-    console.error("❌ Map Error:", e);
+    console.error("❌ Map Initialization Failed:", e);
   }
 };
 
-// Helper: Handle updates
+// Helper: Update Search Text & App Data
 function updateFromMarker() {
   const pos = marker.position;
   const lat = (typeof pos.lat === 'function') ? pos.lat() : pos.lat;
@@ -105,7 +105,7 @@ function updateFromMarker() {
   }
 }
 
-// Send to App
+// Send Data to App
 function sendToFlutter(lat, lng) {
   const data = { action: "locationPicked", lat: lat, lng: lng };
   if (window.FlutterChan) {
