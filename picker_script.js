@@ -17,7 +17,7 @@ window.initPickerMap = async function() {
       center: defaultPos,
       zoom: 15,
       mapId: "48c2bb983bd19c1c44d95cb7",
-      mapTypeControl: true,       // ✅ ENABLED SATELLITE VIEW BUTTON
+      mapTypeControl: true, // ✅ THIS ENABLES THE SATELLITE BUTTON
       streetViewControl: false,
       fullscreenControl: false
     });
@@ -26,113 +26,105 @@ window.initPickerMap = async function() {
     marker = new google.maps.marker.AdvancedMarkerElement({
       map: map,
       position: defaultPos,
-      gmpDraggable: true,
-      title: "Selected Location"
+      gmpDraggable: true
     });
 
-    // 4. SETUP SEARCH LISTENER
-    const autocompleteComponent = document.getElementById("pac-input");
+    // 4. SETUP SEARCH
+    const searchBar = document.getElementById("pac-input");
+    
+    // 🛑 CRITICAL FIX: I removed "map.controls.push".
+    // This allows the HTML/CSS to handle the position (Top-Center),
+    // so it doesn't block the Satellite button.
 
-    // ⚠️ IMPORTANT: We DO NOT push to map.controls anymore.
-    // This allows the CSS to float it in the center.
-
-    // 5. LISTENER: Handle the Search Jump
-    autocompleteComponent.addEventListener('gmp-placeselect', async ({ detail }) => {
+    // 5. SEARCH LISTENER (THE JUMP FIX)
+    searchBar.addEventListener('gmp-placeselect', async ({ detail }) => {
       const place = detail.place;
       
       if (!place) return;
 
-      // Fetch Location Data
+      // Force fetch logic to ensure we get coordinates
       await place.fetchFields({ 
-        fields: ['location', 'formattedAddress', 'viewport'] 
+        fields: ['location', 'viewport', 'formattedAddress'] 
       });
-
-      // Check if we got coordinates
-      if (!place.location) {
-        console.error("❌ No location coordinates found.");
-        return;
-      }
 
       // A. JUMP TO LOCATION
       if (place.viewport) {
         map.fitBounds(place.viewport);
-      } else {
+      } else if (place.location) {
         map.setCenter(place.location);
         map.setZoom(17);
       }
 
       // B. MOVE MARKER
-      marker.position = place.location;
-
-      // C. SEND DATA
-      sendToFlutter(place.location.lat, place.location.lng);
+      if (place.location) {
+          marker.position = place.location;
+          // Send data to app
+          sendToFlutter(place.location.lat, place.location.lng);
+      }
     });
 
-    // B. Marker Drag Listener
+    // 6. DRAG LISTENER
     marker.addListener("dragend", () => {
-      const pos = marker.position;
-      const lat = (typeof pos.lat === 'function') ? pos.lat() : pos.lat;
-      const lng = (typeof pos.lng === 'function') ? pos.lng() : pos.lng;
-      
-      sendToFlutter(lat, lng);
-      reverseGeocode({ lat, lng });
+      updateFromMarker();
     });
 
-    // C. Map Click Listener
+    // 7. CLICK LISTENER
     map.addListener("click", (e) => {
-      const pos = e.latLng;
-      marker.position = pos;
-      sendToFlutter(pos.lat(), pos.lng());
-      reverseGeocode(pos);
+      marker.position = e.latLng;
+      updateFromMarker();
     });
 
-    console.log("✅ Picker Map Initialized");
+    console.log("✅ Map Initialized Correctly");
 
   } catch (e) {
-    console.error("❌ Map Initialization Failed:", e);
+    console.error("❌ Map Error:", e);
   }
 };
 
-// --- EDIT HANDLER ---
+// Helper: Handle updates
+function updateFromMarker() {
+  const pos = marker.position;
+  // Handle different data types safely
+  const lat = (typeof pos.lat === 'function') ? pos.lat() : pos.lat;
+  const lng = (typeof pos.lng === 'function') ? pos.lng() : pos.lng;
+  
+  sendToFlutter(lat, lng);
+  
+  // Update address text
+  if (geocoder) {
+      geocoder.geocode({ location: {lat, lng} }, (results, status) => {
+        if (status === "OK" && results[0]) {
+           document.getElementById("pac-input").value = results[0].formatted_address;
+        }
+      });
+  }
+}
+
+// Send to App
+function sendToFlutter(lat, lng) {
+  const data = { action: "locationPicked", lat: lat, lng: lng };
+  if (window.FlutterChan) {
+      window.FlutterChan.postMessage(JSON.stringify(data));
+  } else {
+      window.parent.postMessage(data, "*");
+  }
+}
+
+// Initial Position Handler (from App)
 window.addEventListener("message", (event) => {
   if (event.data.action === "setInitialPos") {
     const lat = parseFloat(event.data.lat);
     const lng = parseFloat(event.data.lng);
-    
-    if (!isNaN(lat) && !isNaN(lng) && lat !== 0) {
-      const pos = { lat, lng };
-      const checkMapInterval = setInterval(() => {
-         if (map && marker) {
-             clearInterval(checkMapInterval);
-             map.setCenter(pos);
-             marker.position = pos;
-             map.setZoom(17);
-             reverseGeocode(pos);
-         }
-      }, 100);
+    if (!isNaN(lat) && !isNaN(lng)) {
+         const pos = { lat, lng };
+         const i = setInterval(() => {
+             if (map && marker) {
+                 clearInterval(i);
+                 map.setCenter(pos);
+                 marker.position = pos;
+                 map.setZoom(17);
+             }
+         }, 100);
     }
   }
 });
-
-// Update the Search Box text when pin is moved manually
-function reverseGeocode(latLng) {
-  if (!geocoder) return;
-  geocoder.geocode({ location: latLng }, (results, status) => {
-    if (status === "OK" && results[0]) {
-       const component = document.getElementById("pac-input");
-       if (component) {
-           component.value = results[0].formatted_address;
-       }
-    }
-  });
-}
-
-// Send data back to Flutter
-function sendToFlutter(lat, lng) {
-  const data = { action: "locationPicked", lat: lat, lng: lng };
-  if (window.FlutterChan) {
-    window.FlutterChan.postMessage(JSON.stringify(data));
-  } else {
-    window.parent.postMessage(data, "*");
-  }
-}
