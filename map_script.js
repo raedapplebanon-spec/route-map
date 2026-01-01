@@ -194,25 +194,99 @@ window.setRouteData = function(routeArray, availableArray) {
 };
 
 function calculateRoadRoute(clusters) {
-    const startStop = clusters.find(c => (c.stopType === 'assistant' && c.timeShift === 'AM') || c.isStart);
-    const endStop = clusters.find(c => (c.stopType === 'assistant' && c.timeShift === 'PM') || c.isFinal);
-    if (!startStop || !endStop) return;
+  // 1. Identify the absolute Start and End (Driver/School)
+  const startPoint = clusters.find(c => c.isStart);
+  const endPoint = clusters.find(c => c.isFinal);
+  
+  if (!startPoint || !endPoint) return;
 
-    const waypoints = clusters.filter(c => c !== startStop && c !== endStop);
+  // 2. Identify Assistants
+  const assistantAM = clusters.find(c => c.stopType === 'assistant' && c.timeShift === 'AM');
+  const assistantPM = clusters.find(c => c.stopType === 'assistant' && c.timeShift === 'PM');
 
-    directionsService.route({
-        origin: { lat: startStop.lat, lng: startStop.lng },
-        destination: { lat: endStop.lat, lng: endStop.lng },
-        waypoints: waypoints.map(c => ({ location: { lat: c.lat, lng: c.lng }, stopover: true })),
-        travelMode: google.maps.TravelMode.DRIVING,
-        optimizeWaypoints: true,
-    }, (result, status) => {
-        if (status === "OK") {
-            directionsRenderer.setDirections(result);
-            const route = result.routes[0];
-            let dist = 0, dur = 0;
-            route.legs.forEach(leg => { dist += leg.distance.value; dur += leg.duration.value; });
-            updateRouteSummary((dist / 1000).toFixed(1), Math.round(dur / 60));
-        }
+  // 3. Filter out everyone else (Students)
+  const studentWaypoints = clusters.filter(c => 
+    c !== startPoint && 
+    c !== endPoint && 
+    c !== assistantAM && 
+    c !== assistantPM
+  );
+
+  // 4. Construct the Waypoint Array in a specific order:
+  // [Assistant AM (Fixed), ...Students (Optimized), Assistant PM (Fixed)]
+  let finalWaypoints = [];
+
+  if (assistantAM) {
+    finalWaypoints.push({
+      location: { lat: assistantAM.lat, lng: assistantAM.lng },
+      stopover: true // Assistant AM must be first
     });
+  }
+
+  // Add students to the middle
+  studentWaypoints.forEach(s => {
+    finalWaypoints.push({
+      location: { lat: s.lat, lng: s.lng },
+      stopover: true
+    });
+  });
+
+  if (assistantPM) {
+    finalWaypoints.push({
+      location: { lat: assistantPM.lat, lng: assistantPM.lng },
+      stopover: true // Assistant PM must be last
+    });
+  }
+
+  // 5. Call Directions Service
+  directionsService.route({
+    origin: { lat: startPoint.lat, lng: startPoint.lng },
+    destination: { lat: endPoint.lat, lng: endPoint.lng },
+    waypoints: finalWaypoints,
+    travelMode: google.maps.TravelMode.DRIVING,
+    // CRITICAL: Google will optimize the middle, 
+    // but the array order determines the start/end of the waypoints
+    optimizeWaypoints: true, 
+  }, (result, status) => {
+    if (status === "OK") {
+      directionsRenderer.setDirections(result);
+      
+      // Update the Marker numbers (1, 2, 3...) on the map
+      const route = result.routes[0];
+      const waypointOrder = route.waypoint_order; // e.g. [0, 2, 1, 3]
+      
+      // We need to map the optimized order back to our markers
+      // Note: Assistant AM is index 0 in finalWaypoints, Assistant PM is the last index
+      updateMarkerGylphs(result, finalWaypoints);
+
+      let dist = 0, dur = 0;
+      route.legs.forEach(leg => { 
+        dist += leg.distance.value; 
+        dur += leg.duration.value; 
+      });
+      updateRouteSummary((dist / 1000).toFixed(1), Math.round(dur / 60));
+    }
+  });
 }
+
+function updateMarkerGylphs(result, finalWaypoints) {
+  const route = result.routes[0];
+  const order = route.waypoint_order; 
+
+  // The 'order' array from Google tells us how it re-arranged the waypoints list
+  // We match these back to our AdvancedMarkerElement positions
+  order.forEach((originalIdx, stepIdx) => {
+    const latLng = finalWaypoints[originalIdx].location;
+    const stopNumber = (stepIdx + 1).toString();
+
+    const markerObj = window.routeMarkers.find(m => 
+      Math.abs(m.lat - latLng.lat) < 0.0001 && 
+      Math.abs(m.lng - latLng.lng) < 0.0001
+    );
+
+    if (markerObj && markerObj.pin) {
+      markerObj.pin.glyphText = stopNumber;
+    }
+  });
+}
+
