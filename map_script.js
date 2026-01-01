@@ -53,7 +53,7 @@ function updateRouteSummary(km, minutes) {
   const summaryText = document.getElementById("summary-text");
   if (summaryBox && summaryText) {
     summaryBox.classList.remove("hidden");
-    summaryText.innerHTML = `المسافة: <b>${km} كم</b><br>الوقت: <b>${minutes} دقيقة</b>`;
+    summaryText.innerHTML = المسافة: <b>${km} كم</b><br>الوقت: <b>${minutes} دقيقة</b>;
   }
 }
 
@@ -128,7 +128,6 @@ async function initMap() {
     pendingData = null;
   }
 }
-
 function setRouteData(routeArray, availableArray) {
   if (!mapReady) {
     pendingData = { route: routeArray, available: availableArray };
@@ -179,10 +178,10 @@ function setRouteData(routeArray, availableArray) {
     let initialText = cluster.isStart ? "S" : (cluster.isFinal ? "E" : "...");
     let namesArr = cluster.items.map(x => x.studentName || x.label || "طالب");
 
-    let html = `<div style="color:black;text-align:right;direction:rtl;min-width:150px;">`;
-    html += `<b style="color:${color};">${cluster.isStart ? "نقطة البداية" : (cluster.isFinal ? "نقطة النهاية" : "محطة توقف")}</b><hr style="margin:5px 0;">`;
-    namesArr.forEach(name => { html += `<div style="margin-bottom:4px;">• <b>${name}</b></div>`; });
-    html += `</div>`;
+    let html = <div style="color:black;text-align:right;direction:rtl;min-width:150px;">;
+    html += <b style="color:${color};">${cluster.isStart ? "نقطة البداية" : (cluster.isFinal ? "نقطة النهاية" : "محطة توقف")}</b><hr style="margin:5px 0;">;
+    namesArr.forEach(name => { html += <div style="margin-bottom:4px;">• <b>${name}</b></div>; });
+    html += </div>;
 
     const markerObj = addMarker(pos, "route", html, color, initialText, namesArr);
     routeMarkers.push(markerObj);
@@ -194,12 +193,12 @@ function setRouteData(routeArray, availableArray) {
     bounds.extend(pos);
     let namesArr = cluster.items.map(x => x.studentName);
 
-    let html = `<div style="color:black;text-align:right;direction:rtl;min-width:150px;">`;
-    html += `<b style="color:#ff9100;">خارج الجولة (${cluster.items.length})</b><hr style="margin:5px 0;">`;
+    let html = <div style="color:black;text-align:right;direction:rtl;min-width:150px;">;
+    html += <b style="color:#ff9100;">خارج الجولة (${cluster.items.length})</b><hr style="margin:5px 0;">;
     cluster.items.forEach(x => {
-      html += `<div style="margin-bottom:8px;">👨‍🎓 <b>${x.studentName}</b><br><small>${x.gradeName}</small></div>`;
+      html += <div style="margin-bottom:8px;">👨‍🎓 <b>${x.studentName}</b><br><small>${x.gradeName}</small></div>;
     });
-    html += `</div>`;
+    html += </div>;
 
     const mObj = addMarker(pos, "available", html, "#ff9100", cluster.items.length.toString(), namesArr);
     availableMarkers.push(mObj);
@@ -218,88 +217,30 @@ function calculateRoadRoute(clusters) {
   const endStop = clusters.find(c => c.isFinal);
   if (!startStop || !endStop) return;
 
-  // ===============================
-  // ⭐ Identify assistant points
-  // ===============================
-  const assistantAM = clusters.find(c =>
-    c.items.some(x => x.stopType === "assistant" && x.timeShift === "AM")
-  );
+  const waypointClusters = clusters.filter(c => !c.isStart && !c.isFinal);
 
-  const assistantPM = clusters.find(c =>
-    c.items.some(x => x.stopType === "assistant" && x.timeShift === "PM")
-  );
-
-  // ===============================
-  // ⭐ Only STUDENT clusters are optimized
-  // ===============================
-  const waypointClusters = clusters.filter(c =>
-    !c.isStart &&
-    !c.isFinal &&
-    c.items.some(x => x.stopType === "student")
-  );
-
-  // Convert student waypoints to Google format
-  let googleWaypoints = waypointClusters.map(c => ({
-    location: { lat: c.lat, lng: c.lng },
-    stopover: true
-  }));
-
-  // ===============================
-  // ⭐ Insert assistant as FIXED waypoint
-  // ===============================
-  if (assistantAM) {
-    // Assistant appears directly AFTER start, BEFORE optimized students
-    googleWaypoints.unshift({
-      location: { lat: assistantAM.lat, lng: assistantAM.lng },
-      stopover: true
-    });
-  }
-
-  if (assistantPM) {
-    // Assistant appears directly BEFORE end, AFTER optimized students
-    googleWaypoints.push({
-      location: { lat: assistantPM.lat, lng: assistantPM.lng },
-      stopover: true
-    });
-  }
-
-  // ===============================
-  // ⭐ Call Google Directions
-  // ===============================
   directionsService.route({
     origin: { lat: startStop.lat, lng: startStop.lng },
     destination: { lat: endStop.lat, lng: endStop.lng },
-    waypoints: googleWaypoints,
+    waypoints: waypointClusters.map(c => ({ location: { lat: c.lat, lng: c.lng }, stopover: true })),
     travelMode: google.maps.TravelMode.DRIVING,
     optimizeWaypoints: true,
   }, (result, status) => {
     if (status === "OK") {
       directionsRenderer.setDirections(result);
-
-      const optimizedOrder = result.routes[0].waypoint_order;
-
-      // Re-apply numbering ONLY for student clusters
+      const optimizedOrder = result.routes[0].waypoint_order; 
       optimizedOrder.forEach((originalIndex, stepIndex) => {
         const clusterData = waypointClusters[originalIndex];
         const stopNum = (stepIndex + 1).toString();
-
-        const markerObj = routeMarkers.find(m =>
-          Math.abs(m.lat - clusterData.lat) < 0.0001 &&
+        const markerObj = routeMarkers.find(m => 
+          Math.abs(m.lat - clusterData.lat) < 0.0001 && 
           Math.abs(m.lng - clusterData.lng) < 0.0001
         );
-
-        if (markerObj) {
-          markerObj.pin.glyphText = stopNum;
-        }
+        if (markerObj) markerObj.pin.glyphText = stopNum;
       });
-
-      // Distance/time summary
       const route = result.routes[0];
       let dist = 0, dur = 0;
-      route.legs.forEach(leg => {
-        dist += leg.distance.value;
-        dur += leg.duration.value;
-      });
+      route.legs.forEach(leg => { dist += leg.distance.value; dur += leg.duration.value; });
       updateRouteSummary((dist / 1000).toFixed(1), Math.round(dur / 60));
     }
   });
@@ -307,4 +248,3 @@ function calculateRoadRoute(clusters) {
 
 window.initMap = initMap;
 window.setRouteData = setRouteData;
-
