@@ -6,25 +6,19 @@
   <style>
     html, body, #map { height: 100%; margin: 0; padding: 0; }
     
-    /* NEW: Style the standard Input to look professional */
-    #pac-input {
-      background-color: #fff;
-      font-family: 'Segoe UI', Arial, sans-serif;
-      font-size: 15px;
+    /* Style the Native Component */
+    gmp-place-autocomplete {
+      box-shadow: 0 2px 6px rgba(0,0,0,0.3);
       margin: 10px;
-      padding: 0 11px 0 13px;
-      text-overflow: ellipsis;
       width: 300px;
-      height: 40px;
-      border: 1px solid #transparent;
-      border-radius: 2px;
-      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
-      outline: none;
+      border-radius: 8px; /* Optional rounded corners */
+      background: white;
     }
     
-    /* Ensure the input text aligns correctly for Arabic */
-    #pac-input:focus {
-      border-color: #4d90fe;
+    /* Hide the default internal input border if needed */
+    gmp-place-autocomplete::part(input) {
+      padding: 10px;
+      font-family: 'Segoe UI', Arial, sans-serif;
     }
   </style>
 
@@ -32,13 +26,17 @@
 </head>
 <body>
 
-  <input id="pac-input" class="controls" type="text" placeholder="ابحث عن موقع..." />
+  <gmp-place-autocomplete 
+      id="pac-input" 
+      placeholder="ابحث عن موقع..." 
+      types="geocode">
+  </gmp-place-autocomplete>
 
   <div id="map"></div>
 
   <script
-  src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCYaJ4Gjq36mq8swYgjNXOYr5mKZi45niA&libraries=marker,places,geocoding&callback=initPickerMap&loading=async&v=beta"
-  async defer>
-</script>
+    src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCYaJ4Gjq36mq8swYgjNXOYr5mKZi45niA&libraries=marker,places,geocoding&callback=initPickerMap&loading=async&v=beta"
+    async defer>
+  </script>
 </body>
 </html>
