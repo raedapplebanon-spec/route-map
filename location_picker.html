@@ -6,16 +6,16 @@
   <style>
     html, body, #map { height: 100%; margin: 0; padding: 0; }
     
-    /* Style the component using its ID */
-    #pac-input {
+    /* Style the new component to look like your working Route Map */
+    gmpx-place-autocomplete {
       background-color: #fff;
+      font-family: 'Segoe UI', Arial, sans-serif;
+      margin: 10px;
       width: 300px;
-      margin-top: 10px;
+      height: 45px;
       border-radius: 8px;
       box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-      /* Font settings to ensure text looks right */
-      font-family: 'Segoe UI', Arial, sans-serif;
-      font-size: 14px;
+      z-index: 10;
     }
   </style>
 
@@ -23,7 +23,7 @@
 </head>
 <body>
 
-  <div id="pac-input"></div>
+  <gmpx-place-autocomplete id="pac-input" placeholder="ابحث عن موقع..."></gmpx-place-autocomplete>
 
   <div id="map"></div>
 
