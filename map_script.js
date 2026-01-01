@@ -75,38 +75,63 @@ window.initMap = async function() {
     try {
         const { Map } = await google.maps.importLibrary("maps");
         const { AdvancedMarkerElement, PinElement } = await google.maps.importLibrary("marker");
-        const { PlaceAutocompleteElement } = await google.maps.importLibrary("places");
+        const { Places } = await google.maps.importLibrary("places"); // Standard Places Lib
 
         infoWindow = new google.maps.InfoWindow();
 
+        // Initialize Map
         map = new Map(document.getElementById("map"), {
             center: { lat: 32.028031, lng: 35.704308 },
             zoom: 13,
             mapId: MY_MAP_ID,
             mapTypeControl: true,
             streetViewControl: true,
+            fullscreenControl: false
         });
 
-        const autocompleteWidget = document.getElementById("pac-input");
-        map.controls[google.maps.ControlPosition.TOP_LEFT].push(autocompleteWidget);
+        // --- FIXED SEARCH BAR LOGIC ---
+        const input = document.getElementById("pac-input");
+        
+        // Push the input to the top left
+        map.controls[google.maps.ControlPosition.TOP_LEFT].push(input);
+        input.style.display = "block"; // Make sure it shows up
 
-        autocompleteWidget.addEventListener('gmp-placeselect', async (e) => {
-            const place = e.detail.place;
-            const query = (place.displayName || "").toLowerCase();
+        const autocomplete = new google.maps.places.Autocomplete(input);
+        autocomplete.bindTo("bounds", map);
+
+        // Standard Listener
+        autocomplete.addListener("place_changed", () => {
+            const place = autocomplete.getPlace();
+
+            if (!place.geometry || !place.geometry.location) {
+                // User entered the name of a Place that was not suggested and
+                // pressed the Enter key, or the Place Details request failed.
+                return;
+            }
+
+            // Check if this matches a student marker first
+            const query = (place.name || "").toLowerCase();
             const allMarkers = [...window.routeMarkers, ...window.availableMarkers];
             const found = allMarkers.find(m => m.names.some(name => name.toLowerCase().includes(query)));
 
             if (found) {
+                // If it matches a student, zoom to the student marker
                 map.setCenter(found.marker.position);
                 map.setZoom(18);
                 infoWindow.setContent(found.html);
                 infoWindow.open(map, found.marker);
             } else {
-                if (!place.geometry) await place.fetchFields({ fields: ['geometry', 'location'] });
-                if (place.geometry) map.setCenter(place.geometry.location);
+                // Otherwise, standard map jump
+                if (place.geometry.viewport) {
+                    map.fitBounds(place.geometry.viewport);
+                } else {
+                    map.setCenter(place.geometry.location);
+                    map.setZoom(17);
+                }
             }
         });
 
+        // Initialize Directions
         directionsService = new google.maps.DirectionsService();
         directionsRenderer = new google.maps.DirectionsRenderer({
             map: map,
@@ -115,8 +140,13 @@ window.initMap = async function() {
             polylineOptions: { strokeColor: "#1a73e8", strokeOpacity: 0.8, strokeWeight: 5 },
         });
 
+        // Move the Legend to the bottom right
+        const legend = document.getElementById("legend");
+        map.controls[google.maps.ControlPosition.RIGHT_BOTTOM].push(legend);
+        legend.style.display = "block";
+
         mapReady = true;
-        console.log("✅ Map Initialized Successfully");
+        console.log("✅ Route Map Initialized Successfully");
 
         if (window.pendingData) {
             window.setRouteData(window.pendingData.route, window.pendingData.available);
@@ -183,7 +213,6 @@ window.setRouteData = function(routeArray, availableArray) {
         } else if (cluster.isFinal) {
             color = "#d50000"; initialText = "E"; headerTitle = "نقطة النهاية";
         } else if (cluster.stopType === 'assistant') {
-            // ⭐ NEW COLOR: Purple for Assistant
             color = "#9C27B0"; 
             initialText = cluster.timeShift === 'AM' ? "A" : "P";
             headerTitle = "المساعد (" + cluster.timeShift + ")";
@@ -215,7 +244,6 @@ window.setRouteData = function(routeArray, availableArray) {
         const pos = { lat: cluster.lat, lng: cluster.lng };
         bounds.extend(pos);
 
-        // Build HTML with Grade & Section for Available students too
         let studentRows = cluster.items.map(function(x) {
             let name = x.studentName || "طالب";
             let details = (x.gradeName || "") + " " + (x.sectionName || "");
@@ -242,7 +270,7 @@ window.setRouteData = function(routeArray, availableArray) {
     }
 };
 
-// 6. ROUTE CALCULATION (Locked Assistant Logic)
+// 6. ROUTE CALCULATION
 function calculateRoadRoute(clusters) {
     const startPoint = clusters.find(c => c.isStart);
     const endPoint = clusters.find(c => c.isFinal);
