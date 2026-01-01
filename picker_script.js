@@ -1,13 +1,13 @@
 // --- Globals ---
-let map, marker, geocoder, autocomplete;
+let map, marker, geocoder;
 
 // 1. ATTACH IMMEDIATELY
 window.initPickerMap = async function() {
   try {
-    // Load Libraries
+    // Load Libraries (Matching your working code)
     await google.maps.importLibrary("maps");
     await google.maps.importLibrary("marker");
-    const { PlaceAutocompleteElement } = await google.maps.importLibrary("places");
+    await google.maps.importLibrary("places");
     await google.maps.importLibrary("geocoding");
 
     geocoder = new google.maps.Geocoder();
@@ -29,34 +29,17 @@ window.initPickerMap = async function() {
       title: "Move to select location"
     });
 
-    // 2. CREATE the Search Component
-    // We create a container DIV to force the layout style
-    const searchContainer = document.createElement("div");
-    searchContainer.style.margin = "10px";
-    searchContainer.style.zIndex = "1"; // Ensure it sits on top
-
-    // Create the Google Autocomplete Element
-    autocomplete = new PlaceAutocompleteElement();
+    // 2. SETUP SEARCH (Matching your working Route Map logic)
+    // We grab the element from the HTML instead of creating it in JS
+    const autocompleteWidget = document.getElementById("pac-input");
     
-    // ⭐ CRITICAL FIX: Apply the ID to the ACTUAL DOM Element
-    autocomplete.element.id = "pac-input";
-    
-    // ⭐ FORCE STYLING: Ensure it has width and background
-    autocomplete.element.style.width = "300px";
-    autocomplete.element.style.backgroundColor = "white";
-    autocomplete.element.style.borderRadius = "8px";
-    autocomplete.element.style.boxShadow = "0 2px 6px rgba(0,0,0,0.3)";
-
-    // Put the widget inside our container
-    searchContainer.appendChild(autocomplete.element);
-
-    // Add the Container to the Map UI (Top Left)
-    map.controls[google.maps.ControlPosition.TOP_LEFT].push(searchContainer);
+    // Add to Map UI (Top Left)
+    map.controls[google.maps.ControlPosition.TOP_LEFT].push(autocompleteWidget);
 
     // 3. LISTENERS
 
-    // A. Search Box Listener
-    autocomplete.addEventListener('gmp-placeselect', async (e) => {
+    // A. Search Box Listener (gmp-placeselect)
+    autocompleteWidget.addEventListener('gmp-placeselect', async (e) => {
       const place = e.detail.place;
       
       // Ensure geometry is fetched
@@ -70,6 +53,11 @@ window.initPickerMap = async function() {
         marker.position = pos;
         map.setZoom(17);
         sendToFlutter(pos.lat(), pos.lng());
+        
+        // Update the visual text in the box if possible
+        if (place.formatted_address) {
+            autocompleteWidget.value = place.formatted_address;
+        }
       }
     });
 
@@ -77,6 +65,7 @@ window.initPickerMap = async function() {
     marker.addListener("dragend", () => {
       const pos = marker.position;
       sendToFlutter(pos.lat, pos.lng);
+      reverseGeocode(pos);
     });
 
     // C. Map Click Listener
@@ -84,6 +73,7 @@ window.initPickerMap = async function() {
       const pos = e.latLng;
       marker.position = pos;
       sendToFlutter(pos.lat(), pos.lng());
+      reverseGeocode(pos);
     });
 
     console.log("✅ Picker Map Initialized Successfully");
@@ -107,11 +97,26 @@ window.addEventListener("message", (event) => {
              map.setCenter(pos);
              marker.position = pos;
              map.setZoom(17);
+             reverseGeocode(pos);
          }
       }, 100);
     }
   }
 });
+
+// Update the Search Box text when pin is moved manually
+function reverseGeocode(latLng) {
+  if (!geocoder) return;
+  geocoder.geocode({ location: latLng }, (results, status) => {
+    if (status === "OK" && results[0]) {
+      const widget = document.getElementById("pac-input");
+      if (widget) {
+          // Update the text inside the component
+          widget.value = results[0].formatted_address;
+      }
+    }
+  });
+}
 
 // Send data back to Flutter
 function sendToFlutter(lat, lng) {
