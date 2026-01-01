@@ -4,7 +4,7 @@ let map, marker, geocoder;
 // 1. ATTACH IMMEDIATELY
 window.initPickerMap = async function() {
   try {
-    // Load Libraries (Matching your working code)
+    // Load Libraries
     await google.maps.importLibrary("maps");
     await google.maps.importLibrary("marker");
     await google.maps.importLibrary("places");
@@ -29,37 +29,40 @@ window.initPickerMap = async function() {
       title: "Move to select location"
     });
 
-    // 2. SETUP SEARCH (Matching your working Route Map logic)
-    // We grab the element from the HTML instead of creating it in JS
+    // 2. SETUP SEARCH (Using the HTML element)
     const autocompleteWidget = document.getElementById("pac-input");
     
-    // Add to Map UI (Top Left)
-    map.controls[google.maps.ControlPosition.TOP_LEFT].push(autocompleteWidget);
+    // Check if the element was actually found to prevent errors
+    if (autocompleteWidget) {
+        // Add to Map UI (Top Left)
+        map.controls[google.maps.ControlPosition.TOP_LEFT].push(autocompleteWidget);
 
-    // 3. LISTENERS
-
-    // A. Search Box Listener (gmp-placeselect)
-    autocompleteWidget.addEventListener('gmp-placeselect', async (e) => {
-      const place = e.detail.place;
-      
-      // Ensure geometry is fetched
-      if (!place.geometry) {
-        await place.fetchFields({ fields: ['geometry', 'location', 'formatted_address'] });
-      }
-
-      if (place.geometry && place.geometry.location) {
-        const pos = place.geometry.location;
-        map.setCenter(pos);
-        marker.position = pos;
-        map.setZoom(17);
-        sendToFlutter(pos.lat(), pos.lng());
+        // 3. LISTENERS
         
-        // Update the visual text in the box if possible
-        if (place.formatted_address) {
-            autocompleteWidget.value = place.formatted_address;
-        }
-      }
-    });
+        // A. Search Box Listener
+        autocompleteWidget.addEventListener('gmp-placeselect', async (e) => {
+          const place = e.detail.place;
+          
+          if (!place.geometry) {
+            await place.fetchFields({ fields: ['geometry', 'location', 'formatted_address'] });
+          }
+
+          if (place.geometry && place.geometry.location) {
+            const pos = place.geometry.location;
+            map.setCenter(pos);
+            marker.position = pos;
+            map.setZoom(17);
+            sendToFlutter(pos.lat(), pos.lng());
+            
+            // Update text in box
+            if (place.formatted_address) {
+                autocompleteWidget.value = place.formatted_address;
+            }
+          }
+        });
+    } else {
+        console.error("❌ Could not find element with id 'pac-input'");
+    }
 
     // B. Marker Drag Listener
     marker.addListener("dragend", () => {
@@ -111,7 +114,6 @@ function reverseGeocode(latLng) {
     if (status === "OK" && results[0]) {
       const widget = document.getElementById("pac-input");
       if (widget) {
-          // Update the text inside the component
           widget.value = results[0].formatted_address;
       }
     }
