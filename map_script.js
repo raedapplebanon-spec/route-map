@@ -178,21 +178,18 @@ window.setRouteData = function(routeArray, availableArray) {
         let initialText = "...";
         let headerTitle = "نقطة توقف";
 
-        // Logic Priority: Assistant Logic First!
-        if (cluster.stopType === 'assistant') {
-            // ⭐ FIXED: Purple for Assistant
+        if (cluster.isStart) {
+            color = "#00c853"; initialText = "S"; headerTitle = "نقطة البداية";
+        } else if (cluster.isFinal) {
+            color = "#d50000"; initialText = "E"; headerTitle = "نقطة النهاية";
+        } else if (cluster.stopType === 'assistant') {
+            // ⭐ NEW COLOR: Purple for Assistant
             color = "#9C27B0"; 
             initialText = cluster.timeShift === 'AM' ? "A" : "P";
             headerTitle = "المساعد (" + cluster.timeShift + ")";
-        } 
-        else if (cluster.isStart) {
-            color = "#00c853"; initialText = "S"; headerTitle = "نقطة البداية";
-        } 
-        else if (cluster.isFinal) {
-            color = "#d50000"; initialText = "E"; headerTitle = "نقطة النهاية";
         }
 
-        // ⭐ FIXED: Build HTML loop for Grade & Section
+        // Build HTML with Grade & Section
         let studentRows = cluster.items.map(function(x) {
             let name = x.studentName || "طالب";
             let details = (x.gradeName || "") + " " + (x.sectionName || "");
@@ -218,7 +215,7 @@ window.setRouteData = function(routeArray, availableArray) {
         const pos = { lat: cluster.lat, lng: cluster.lng };
         bounds.extend(pos);
 
-        // ⭐ FIXED: Show Grade & Section here too
+        // Build HTML with Grade & Section for Available students too
         let studentRows = cluster.items.map(function(x) {
             let name = x.studentName || "طالب";
             let details = (x.gradeName || "") + " " + (x.sectionName || "");
