@@ -10,13 +10,14 @@ window.initPickerMap = async function() {
     await google.maps.importLibrary("geocoding");
 
     geocoder = new google.maps.Geocoder();
+    // Default: Jordan
     const defaultPos = { lat: 32.0280, lng: 35.7043 };
 
     // 2. Initialize Map
     map = new google.maps.Map(document.getElementById("map"), {
       center: defaultPos,
       zoom: 15,
-      mapId: "48c2bb983bd19c1c44d95cb7",
+      mapId: "48c2bb983bd19c1c44d95cb7", // Your Map ID
       mapTypeControl: false,
       streetViewControl: false
     });
@@ -26,62 +27,57 @@ window.initPickerMap = async function() {
       map: map,
       position: defaultPos,
       gmpDraggable: true,
-      title: "Move to select location"
+      title: "Selected Location"
     });
 
-    // 4. SETUP SEARCH
+    // 4. SETUP SEARCH LISTENER
+    // We target your <gmp-place-autocomplete> element
     const autocompleteComponent = document.getElementById("pac-input");
     
-    // Add to Map UI
+    // Add the search box to the map (top-left)
     map.controls[google.maps.ControlPosition.TOP_LEFT].push(autocompleteComponent);
 
-    // 5. LISTENER: HANDLES THE JUMP
+    // 5. THE FIX: Handle the Search Selection
     autocompleteComponent.addEventListener('gmp-placeselect', async ({ detail }) => {
+      const place = detail.place;
       
-      // 👇 NEW: Error trapping to see why it fails
-      try {
-          const place = detail.place;
-          
-          if (!place) {
-            alert("❌ System Error: Place object is missing.");
-            return;
-          }
+      // If the API returns nothing, stop.
+      if (!place) return;
 
-          // Fetch fields (This is usually where it fails if API is blocked)
-          await place.fetchFields({ 
-            fields: ['location', 'displayName', 'formattedAddress', 'viewport'] 
-          });
+      // Fetch the location data (Network Request)
+      await place.fetchFields({ 
+        fields: ['location', 'displayName', 'formattedAddress', 'viewport'] 
+      });
 
-          // Check if location exists
-          if (!place.location) {
-            alert("⚠️ No coordinates found for this place. Please try a different specific location.");
-            return;
-          }
-
-          // MOVE THE MAP
-          if (place.viewport) {
-            map.fitBounds(place.viewport);
-          } else {
-            map.setCenter(place.location);
-            map.setZoom(17);
-          }
-
-          // MOVE THE MARKER
-          marker.position = place.location;
-
-          // Send data
-          sendToFlutter(place.location.lat, place.location.lng);
-
-      } catch (error) {
-          // 🚨 THIS ALERT WILL TELL US THE REAL PROBLEM
-          console.error(error);
-          alert("❌ Error fetching location: " + error.message + "\n\nCheck your console for details.");
+      // If no location data came back, we cannot move the map.
+      if (!place.location) {
+        console.error("❌ Place found, but no location coordinates available.");
+        return;
       }
+
+      // --- LOGIC TO JUMP TO PLACE ---
+      
+      // 1. Update Marker immediately
+      marker.position = place.location;
+
+      // 2. Move Map Camera
+      if (place.viewport) {
+        // If it's a city/region, zoom to fit
+        map.fitBounds(place.viewport);
+      } else {
+        // If it's a specific building, center on it
+        map.setCenter(place.location);
+        map.setZoom(17);
+      }
+
+      // 3. Send data to your App
+      sendToFlutter(place.location.lat, place.location.lng);
     });
 
     // B. Marker Drag Listener
     marker.addListener("dragend", () => {
       const pos = marker.position;
+      // Get lat/lng safely
       const lat = (typeof pos.lat === 'function') ? pos.lat() : pos.lat;
       const lng = (typeof pos.lng === 'function') ? pos.lng() : pos.lng;
       
@@ -97,21 +93,23 @@ window.initPickerMap = async function() {
       reverseGeocode(pos);
     });
 
-    console.log("✅ Picker Map Initialized Successfully");
+    console.log("✅ Map Initialized");
 
   } catch (e) {
-    console.error("❌ Map Initialization Failed:", e);
+    console.error("❌ Map Error:", e);
   }
 };
 
-// --- EDIT HANDLER ---
+// --- HELPER: Set Initial Position (from App) ---
 window.addEventListener("message", (event) => {
   if (event.data.action === "setInitialPos") {
     const lat = parseFloat(event.data.lat);
     const lng = parseFloat(event.data.lng);
     
-    if (!isNaN(lat) && !isNaN(lng) && lat !== 0) {
-      const pos = { lat, lng };
+    if (!isNaN(lat) && !isNaN(lng)) {
+      const pos = { lat: lat, lng: lng };
+      
+      // Wait for map to be ready, then jump
       const checkMapInterval = setInterval(() => {
          if (map && marker) {
              clearInterval(checkMapInterval);
@@ -125,6 +123,7 @@ window.addEventListener("message", (event) => {
   }
 });
 
+// --- HELPER: Get Address from Pin ---
 function reverseGeocode(latLng) {
   if (!geocoder) return;
   geocoder.geocode({ location: latLng }, (results, status) => {
@@ -137,6 +136,7 @@ function reverseGeocode(latLng) {
   });
 }
 
+// --- HELPER: Send Data to Flutter ---
 function sendToFlutter(lat, lng) {
   const data = { action: "locationPicked", lat: lat, lng: lng };
   if (window.FlutterChan) {
@@ -146,6 +146,7 @@ function sendToFlutter(lat, lng) {
   }
 }
 
+// Check if loaded
 if (typeof google !== 'undefined' && google.maps) {
    // window.initPickerMap(); 
 }
