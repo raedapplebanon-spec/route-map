@@ -34,7 +34,6 @@ function groupCloseLocations(stops, tolerance = 15) {
                 if (stop.isStart === true) c.isStart = true;
                 if (stop.isFinal === true) c.isFinal = true;
                 
-                // If any stop is Assistant, the cluster becomes Assistant
                 if (type === 'assistant') {
                     c.stopType = 'assistant';
                     if (shift) c.timeShift = shift;
@@ -75,7 +74,7 @@ window.initMap = async function() {
     try {
         const { Map } = await google.maps.importLibrary("maps");
         const { AdvancedMarkerElement, PinElement } = await google.maps.importLibrary("marker");
-        const { Places } = await google.maps.importLibrary("places"); // Standard Places Lib
+        const { Places } = await google.maps.importLibrary("places");
 
         infoWindow = new google.maps.InfoWindow();
 
@@ -89,45 +88,49 @@ window.initMap = async function() {
             fullscreenControl: false
         });
 
-        // --- FIXED SEARCH BAR LOGIC ---
+        // --- SEARCH BAR SETUP ---
         const input = document.getElementById("pac-input");
-        
-        // Push the input to the top left
         map.controls[google.maps.ControlPosition.TOP_LEFT].push(input);
-        input.style.display = "block"; // Make sure it shows up
+        input.style.display = "block"; 
 
         const autocomplete = new google.maps.places.Autocomplete(input);
         autocomplete.bindTo("bounds", map);
 
-        // Standard Listener
+        // ✅ THE FIX: SEARCH LISTENER (Students First, then Google)
         autocomplete.addListener("place_changed", () => {
             const place = autocomplete.getPlace();
+            
+            // Get the text the user typed OR the place name
+            const searchText = (place.name || input.value || "").toLowerCase();
 
+            // 1. SEARCH OUR STUDENT DATA FIRST
+            const allMarkers = [...window.routeMarkers, ...window.availableMarkers];
+            
+            // Look for a match in student names
+            const foundStudent = allMarkers.find(m => 
+                m.names.some(studentName => studentName.toLowerCase().includes(searchText))
+            );
+
+            if (foundStudent) {
+                // ✅ FOUND STUDENT: Jump to their marker
+                map.setCenter({ lat: foundStudent.lat, lng: foundStudent.lng });
+                map.setZoom(19); // Close Zoom
+                infoWindow.setContent(foundStudent.html);
+                infoWindow.open(map, foundStudent.marker);
+                return; // Stop here, do not do Google search
+            }
+
+            // 2. SEARCH GOOGLE MAPS (Fallback)
             if (!place.geometry || !place.geometry.location) {
-                // User entered the name of a Place that was not suggested and
-                // pressed the Enter key, or the Place Details request failed.
+                // User entered text that isn't a student and isn't a valid place
                 return;
             }
 
-            // Check if this matches a student marker first
-            const query = (place.name || "").toLowerCase();
-            const allMarkers = [...window.routeMarkers, ...window.availableMarkers];
-            const found = allMarkers.find(m => m.names.some(name => name.toLowerCase().includes(query)));
-
-            if (found) {
-                // If it matches a student, zoom to the student marker
-                map.setCenter(found.marker.position);
-                map.setZoom(18);
-                infoWindow.setContent(found.html);
-                infoWindow.open(map, found.marker);
+            if (place.geometry.viewport) {
+                map.fitBounds(place.geometry.viewport);
             } else {
-                // Otherwise, standard map jump
-                if (place.geometry.viewport) {
-                    map.fitBounds(place.geometry.viewport);
-                } else {
-                    map.setCenter(place.geometry.location);
-                    map.setZoom(17);
-                }
+                map.setCenter(place.geometry.location);
+                map.setZoom(17);
             }
         });
 
@@ -140,13 +143,13 @@ window.initMap = async function() {
             polylineOptions: { strokeColor: "#1a73e8", strokeOpacity: 0.8, strokeWeight: 5 },
         });
 
-        // Move the Legend to the bottom right
+        // Move Legend
         const legend = document.getElementById("legend");
         map.controls[google.maps.ControlPosition.RIGHT_BOTTOM].push(legend);
         legend.style.display = "block";
 
         mapReady = true;
-        console.log("✅ Route Map Initialized Successfully");
+        console.log("✅ Route Map Initialized");
 
         if (window.pendingData) {
             window.setRouteData(window.pendingData.route, window.pendingData.available);
@@ -158,13 +161,14 @@ window.initMap = async function() {
     }
 };
 
-// 5. DATA HANDLER: Receive Data
+// 5. DATA HANDLER: Receive Data from Flutter
 window.setRouteData = function(routeArray, availableArray) {
     if (!mapReady) {
         window.pendingData = { route: routeArray, available: availableArray };
         return;
     }
 
+    // Clear old markers
     window.routeMarkers.forEach(obj => obj.marker.map = null);
     window.availableMarkers.forEach(obj => obj.marker.map = null);
     window.routeMarkers = [];
@@ -192,7 +196,15 @@ window.setRouteData = function(routeArray, availableArray) {
             infoWindow.open(map, marker);
         });
 
-        return { marker, pin, names: studentNames, html: html, lat: pos.lat, lng: pos.lng };
+        // Store marker + data for search
+        return { 
+            marker, 
+            pin, 
+            names: studentNames || [], // Ensure array for search
+            html: html, 
+            lat: pos.lat, 
+            lng: pos.lng 
+        };
     };
 
     const routeClusters = groupCloseLocations(routeArray);
@@ -204,7 +216,7 @@ window.setRouteData = function(routeArray, availableArray) {
         const pos = { lat: cluster.lat, lng: cluster.lng };
         bounds.extend(pos);
 
-        let color = "#1a73e8"; // Blue (Default Student)
+        let color = "#1a73e8"; 
         let initialText = "...";
         let headerTitle = "نقطة توقف";
 
@@ -218,7 +230,6 @@ window.setRouteData = function(routeArray, availableArray) {
             headerTitle = "المساعد (" + cluster.timeShift + ")";
         }
 
-        // Build HTML with Grade & Section
         let studentRows = cluster.items.map(function(x) {
             let name = x.studentName || "طالب";
             let details = (x.gradeName || "") + " " + (x.sectionName || "");
@@ -233,7 +244,7 @@ window.setRouteData = function(routeArray, availableArray) {
                    studentRows +
                    '</div>';
 
-        let namesArr = cluster.items.map(x => x.studentName);
+        let namesArr = cluster.items.map(x => x.studentName || "");
         const markerObj = addMarker(pos, "route", html, color, initialText, namesArr);
         window.routeMarkers.push(markerObj);
     });
@@ -258,7 +269,7 @@ window.setRouteData = function(routeArray, availableArray) {
                    studentRows +
                    '</div>';
 
-        let namesArr = cluster.items.map(x => x.studentName);
+        let namesArr = cluster.items.map(x => x.studentName || "");
         const mObj = addMarker(pos, "available", html, "#ff9100", cluster.items.length.toString(), namesArr);
         window.availableMarkers.push(mObj);
     });
@@ -270,7 +281,7 @@ window.setRouteData = function(routeArray, availableArray) {
     }
 };
 
-// 6. ROUTE CALCULATION
+// 6. ROUTE CALCULATION (Unchanged)
 function calculateRoadRoute(clusters) {
     const startPoint = clusters.find(c => c.isStart);
     const endPoint = clusters.find(c => c.isFinal);
@@ -291,7 +302,6 @@ function calculateRoadRoute(clusters) {
         return;
     }
 
-    // Step 1: Optimize Students Only
     const virtualOrigin = assistantAM || startPoint;
     const virtualDest = assistantPM || endPoint;
 
@@ -308,12 +318,10 @@ function calculateRoadRoute(clusters) {
 
             const finalWaypoints = [];
             
-            // Build the Sandwich
             if (assistantAM) finalWaypoints.push({ location: { lat: assistantAM.lat, lng: assistantAM.lng }, stopover: true });
             sortedStudents.forEach(s => finalWaypoints.push({ location: { lat: s.lat, lng: s.lng }, stopover: true }));
             if (assistantPM) finalWaypoints.push({ location: { lat: assistantPM.lat, lng: assistantPM.lng }, stopover: true });
 
-            // Step 2: Render Fixed Route
             renderFinalRoute(startPoint, endPoint, finalWaypoints);
         }
     });
@@ -325,7 +333,7 @@ function renderFinalRoute(start, end, waypoints) {
         destination: { lat: end.lat, lng: end.lng },
         waypoints: waypoints,
         travelMode: google.maps.TravelMode.DRIVING,
-        optimizeWaypoints: false, // Locked Order
+        optimizeWaypoints: false, 
     }, (result, status) => {
         if (status === "OK") {
             directionsRenderer.setDirections(result);
