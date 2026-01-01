@@ -28,10 +28,8 @@ function groupCloseLocations(stops, tolerance = 15) {
                 c.items.push(stop);
                 if (stop.isStart === true) c.isStart = true;
                 if (stop.isFinal === true) c.isFinal = true;
-                // Capture Assistant Data for Logic
                 if (stop.stopType === 'assistant') c.stopType = 'assistant';
                 if (stop.timeShift) c.timeShift = stop.timeShift;
-                
                 c.hideMarker = c.hideMarker && (stop.hideMarker === true || stop.hideMarker === 'true');
                 placed = true;
                 break;
@@ -53,18 +51,18 @@ function groupCloseLocations(stops, tolerance = 15) {
     return clusters;
 }
 
-// 3. UI: Update Summary Box (Fixed Syntax Error)
+// 3. UI: Update Summary Box (FIXED: Using simple concatenation to avoid syntax errors)
 function updateRouteSummary(km, minutes) {
     const summaryBox = document.getElementById("route-summary");
     const summaryText = document.getElementById("summary-text");
     if (summaryBox && summaryText) {
         summaryBox.classList.remove("hidden");
-        // Fixed the syntax error here using backticks ` `
-        summaryText.innerHTML = `المسافة: <b>${km} كم</b><br>الوقت: <b>${minutes} دقيقة</b>`;
+        // Using simple quotes to avoid the "Unexpected token" error
+        summaryText.innerHTML = "المسافة: <b>" + km + " كم</b><br>الوقت: <b>" + minutes + " دقيقة</b>";
     }
 }
 
-// 4. MAIN: Initialize Map (Attached to Window for Safety)
+// 4. MAIN: Initialize Map
 window.initMap = async function() {
     try {
         const { Map } = await google.maps.importLibrary("maps");
@@ -81,19 +79,14 @@ window.initMap = async function() {
             streetViewControl: true,
         });
 
-        // --- 2025 Search Logic ---
         const autocompleteWidget = document.getElementById("pac-input");
         map.controls[google.maps.ControlPosition.TOP_LEFT].push(autocompleteWidget);
 
         autocompleteWidget.addEventListener('gmp-placeselect', async (e) => {
             const place = e.detail.place;
             const query = (place.displayName || "").toLowerCase();
-            
-            // Search inside our markers first (Student Name)
             const allMarkers = [...window.routeMarkers, ...window.availableMarkers];
-            const found = allMarkers.find(m => 
-                m.names.some(name => name.toLowerCase().includes(query))
-            );
+            const found = allMarkers.find(m => m.names.some(name => name.toLowerCase().includes(query)));
 
             if (found) {
                 map.setCenter(found.marker.position);
@@ -101,7 +94,6 @@ window.initMap = async function() {
                 infoWindow.setContent(found.html);
                 infoWindow.open(map, found.marker);
             } else {
-                // If not a student, go to the Google Address
                 if (!place.geometry) await place.fetchFields({ fields: ['geometry', 'location'] });
                 if (place.geometry) map.setCenter(place.geometry.location);
             }
@@ -118,7 +110,6 @@ window.initMap = async function() {
         mapReady = true;
         console.log("✅ Map Initialized Successfully");
 
-        // Pick up data if Flutter sent it early
         if (window.pendingData) {
             window.setRouteData(window.pendingData.route, window.pendingData.available);
             window.pendingData = null;
@@ -136,7 +127,6 @@ window.setRouteData = function(routeArray, availableArray) {
         return;
     }
 
-    // Clear Old Markers
     window.routeMarkers.forEach(obj => obj.marker.map = null);
     window.availableMarkers.forEach(obj => obj.marker.map = null);
     window.routeMarkers = [];
@@ -145,7 +135,6 @@ window.setRouteData = function(routeArray, availableArray) {
 
     const bounds = new google.maps.LatLngBounds();
 
-    // Helper to Create Markers
     const addMarker = (pos, title, html, color, text, studentNames) => {
         const pin = new google.maps.marker.PinElement({
             background: color,
@@ -171,117 +160,91 @@ window.setRouteData = function(routeArray, availableArray) {
     const routeClusters = groupCloseLocations(routeArray);
     const availableClusters = groupCloseLocations(availableArray);
 
-    // --- PLOT ROUTE MARKERS ---
     routeClusters.forEach(cluster => {
         if (cluster.hideMarker) return;
         const pos = { lat: cluster.lat, lng: cluster.lng };
         bounds.extend(pos);
 
-        // Determine Color and Label
-        let color = "#1a73e8"; // Blue (Student)
+        let color = "#1a73e8"; 
         let initialText = "...";
 
         if (cluster.isStart) {
-            color = "#00c853"; // Green
-            initialText = "S";
+            color = "#00c853"; initialText = "S";
         } else if (cluster.isFinal) {
-            color = "#d50000"; // Red
-            initialText = "E";
+            color = "#d50000"; initialText = "E";
         } else if (cluster.stopType === 'assistant') {
-            color = cluster.timeShift === 'AM' ? "#00c853" : "#d50000"; // Green for AM, Red for PM
+            color = cluster.timeShift === 'AM' ? "#00c853" : "#d50000"; 
             initialText = cluster.timeShift === 'AM' ? "A" : "P";
         }
 
         let namesArr = cluster.items.map(x => x.studentName || "طالب");
-        let html = `<div style="color:black;text-align:right;direction:rtl;min-width:150px;">
-                      <b style="color:${color}">${cluster.stopType === 'assistant' ? "المساعد" : "نقطة توقف"}</b><hr>
-                      ${namesArr.map(n => `<div>• <b>${n}</b></div>`).join('')}
-                    </div>`;
+        // Using simple string concatenation for HTML
+        let html = '<div style="color:black;text-align:right;direction:rtl;min-width:150px;">' +
+                   '<b style="color:' + color + '">' + (cluster.stopType === 'assistant' ? "المساعد" : "نقطة توقف") + '</b><hr>' +
+                   namesArr.map(function(n) { return '<div>• <b>' + n + '</b></div>'; }).join('') +
+                   '</div>';
 
         const markerObj = addMarker(pos, "route", html, color, initialText, namesArr);
         window.routeMarkers.push(markerObj);
     });
 
-    // --- PLOT AVAILABLE MARKERS ---
     availableClusters.forEach(cluster => {
         if (cluster.hideMarker) return;
         const pos = { lat: cluster.lat, lng: cluster.lng };
         bounds.extend(pos);
         let namesArr = cluster.items.map(x => x.studentName);
-        let html = `<div style="color:black;text-align:right;direction:rtl;"><b>خارج الجولة</b><hr>${namesArr.join('<br>')}</div>`;
+        let html = '<div style="color:black;text-align:right;direction:rtl;"><b>خارج الجولة</b><hr>' + namesArr.join('<br>') + '</div>';
         const mObj = addMarker(pos, "available", html, "#ff9100", cluster.items.length.toString(), namesArr);
         window.availableMarkers.push(mObj);
     });
 
     if (routeClusters.length >= 2) calculateRoadRoute(routeClusters);
-    
     if (!bounds.isEmpty() && isFirstLoad) {
         map.fitBounds(bounds);
         isFirstLoad = false;
     }
 };
 
-// 6. ROUTE CALCULATION (Sandwich Logic)
+// 6. ROUTE CALCULATION
 function calculateRoadRoute(clusters) {
-    // A. Identify Fixed Points
     const startPoint = clusters.find(c => c.isStart);
     const endPoint = clusters.find(c => c.isFinal);
-    
     if (!startPoint || !endPoint) return;
 
-    // B. Identify Assistants
     const assistantAM = clusters.find(c => c.stopType === 'assistant' && c.timeShift === 'AM');
     const assistantPM = clusters.find(c => c.stopType === 'assistant' && c.timeShift === 'PM');
 
-    // C. Get All Students (Exclude Start, End, and Assistants)
     const studentStops = clusters.filter(c => 
-        c !== startPoint && 
-        c !== endPoint && 
-        c !== assistantAM && 
-        c !== assistantPM
+        c !== startPoint && c !== endPoint && c !== assistantAM && c !== assistantPM
     );
 
-    // D. Build Waypoints Array: [Assistant AM, ...Students, Assistant PM]
     let finalWaypoints = [];
 
-    // Force AM Assistant to be First
     if (assistantAM) {
         finalWaypoints.push({ location: { lat: assistantAM.lat, lng: assistantAM.lng }, stopover: true });
     }
-
-    // Add Students (Middle)
     studentStops.forEach(s => {
         finalWaypoints.push({ location: { lat: s.lat, lng: s.lng }, stopover: true });
     });
-
-    // Force PM Assistant to be Last
     if (assistantPM) {
         finalWaypoints.push({ location: { lat: assistantPM.lat, lng: assistantPM.lng }, stopover: true });
     }
 
-    // E. Request Route
     directionsService.route({
         origin: { lat: startPoint.lat, lng: startPoint.lng },
         destination: { lat: endPoint.lat, lng: endPoint.lng },
         waypoints: finalWaypoints,
         travelMode: google.maps.TravelMode.DRIVING,
-        // Optimization: Google will optimize the order of waypoints.
-        // NOTE: Google *may* reorder Assistants if "optimizeWaypoints" is true.
-        // But listing them first/last is the best hint we can give in a single request.
         optimizeWaypoints: true, 
     }, (result, status) => {
         if (status === "OK") {
             directionsRenderer.setDirections(result);
-            
-            // F. Update Marker Numbers (1, 2, 3...) based on Google's final order
             const route = result.routes[0];
             const order = route.waypoint_order; 
 
             order.forEach((originalIdx, stepIdx) => {
                 const latLng = finalWaypoints[originalIdx].location;
                 const stopNum = (stepIdx + 1).toString();
-
-                // Find marker at this location and update text
                 const markerObj = window.routeMarkers.find(m => 
                     Math.abs(m.lat - latLng.lat) < 0.0001 && 
                     Math.abs(m.lng - latLng.lng) < 0.0001
@@ -291,7 +254,6 @@ function calculateRoadRoute(clusters) {
                 }
             });
 
-            // G. Summary Stats
             let dist = 0, dur = 0;
             route.legs.forEach(leg => { dist += leg.distance.value; dur += leg.duration.value; });
             updateRouteSummary((dist / 1000).toFixed(1), Math.round(dur / 60));
