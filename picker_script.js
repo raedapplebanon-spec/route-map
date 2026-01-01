@@ -16,7 +16,7 @@ window.initPickerMap = async function() {
     map = new google.maps.Map(document.getElementById("map"), {
       center: defaultPos,
       zoom: 15,
-      mapId: "48c2bb983bd19c1c44d95cb7",
+      mapId: "48c2bb983bd19c1c44d95cb7", // Ensure this Map ID is valid in your console
       mapTypeControl: false,
       streetViewControl: false
     });
@@ -29,41 +29,52 @@ window.initPickerMap = async function() {
       title: "Move to select location"
     });
 
-    // 4. SETUP SEARCH (The Modern "Element" Way)
-    // We select the element directly from HTML
+    // 4. SETUP SEARCH
     const autocompleteComponent = document.getElementById("pac-input");
     
-    // Add the search box to the map UI
+    // Add to Map UI
     map.controls[google.maps.ControlPosition.TOP_LEFT].push(autocompleteComponent);
 
-    // 5. LISTENERS
-
-    // A. Search Box Listener (Event is 'gmp-placeselect')
+    // 5. LISTENER: HANDLES THE JUMP
     autocompleteComponent.addEventListener('gmp-placeselect', async ({ detail }) => {
       const place = detail.place;
       
-      // The new API requires us to strictly ask for the fields we need
-      await place.fetchFields({ fields: ['location', 'formattedAddress', 'viewport'] });
+      console.log("📍 Place selected:", place); // Debug Log
 
-      // If no location, stop
-      if (!place.location) return;
+      // Fetch the specific fields we need for the jump
+      await place.fetchFields({ 
+        fields: ['location', 'displayName', 'formattedAddress', 'viewport'] 
+      });
 
-      // Handle Viewport (Zoom to fit) or Center
+      console.log("📍 Location data fetched:", place.location); // Debug Log
+
+      // IF NO LOCATION, STOP
+      if (!place.location) {
+        console.error("❌ No location found for this place!");
+        return;
+      }
+
+      // STEP A: MOVE THE MAP
       if (place.viewport) {
+        // If the place is a city or region, zoom to fit the area
         map.fitBounds(place.viewport);
       } else {
+        // If it's a specific building, jump directly to it
         map.setCenter(place.location);
         map.setZoom(17);
       }
 
+      // STEP B: MOVE THE MARKER
       marker.position = place.location;
+
+      // STEP C: SEND DATA
       sendToFlutter(place.location.lat, place.location.lng);
     });
 
     // B. Marker Drag Listener
     marker.addListener("dragend", () => {
       const pos = marker.position;
-      // Handle LatLng object or simple object
+      // Handle different return types safely
       const lat = (typeof pos.lat === 'function') ? pos.lat() : pos.lat;
       const lng = (typeof pos.lng === 'function') ? pos.lng() : pos.lng;
       
@@ -114,7 +125,6 @@ function reverseGeocode(latLng) {
     if (status === "OK" && results[0]) {
        const component = document.getElementById("pac-input");
        if (component) {
-           // For the web component, we update the 'value' property directly
            component.value = results[0].formatted_address;
        }
     }
