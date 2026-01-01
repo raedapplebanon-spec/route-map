@@ -17,13 +17,13 @@ function haversineDistance(lat1, lng1, lat2, lng2) {
     return 2 * R * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
-// 2. HELPER: Group nearby stops (UPDATED FOR ROBUST ASSISTANT DETECTION)
+// 2. HELPER: Group nearby stops
 function groupCloseLocations(stops, tolerance = 15) {
     const clusters = [];
     stops.forEach(stop => {
         let placed = false;
         
-        // Normalize input data to ensure matching works
+        // Normalize data to catch 'Assistant' vs 'assistant'
         const type = (stop.stopType || "").toLowerCase().trim();
         const shift = (stop.timeShift || "").toUpperCase().trim();
 
@@ -31,15 +31,12 @@ function groupCloseLocations(stops, tolerance = 15) {
             const d = haversineDistance(c.lat, c.lng, parseFloat(stop.lat), parseFloat(stop.lng));
             if (d < tolerance) {
                 c.items.push(stop);
-                
-                // FORCE UPDATE: If this new stop is Start/End/Assistant, upgrade the cluster
                 if (stop.isStart === true) c.isStart = true;
                 if (stop.isFinal === true) c.isFinal = true;
                 
-                // If ANYONE in this group is an assistant, the whole group is an assistant stop
+                // CRITICAL: If any stop in this group is an Assistant, the whole group is Assistant
                 if (type === 'assistant') {
                     c.stopType = 'assistant';
-                    // Capture the shift (AM/PM) from the assistant
                     if (shift) c.timeShift = shift;
                 }
                 
@@ -48,7 +45,6 @@ function groupCloseLocations(stops, tolerance = 15) {
                 break;
             }
         }
-        
         if (!placed) {
             clusters.push({
                 lat: parseFloat(stop.lat),
@@ -56,8 +52,8 @@ function groupCloseLocations(stops, tolerance = 15) {
                 items: [stop],
                 isStart: stop.isStart === true,
                 isFinal: stop.isFinal === true,
-                stopType: type, // Store normalized type
-                timeShift: shift, // Store normalized shift
+                stopType: type,
+                timeShift: shift,
                 hideMarker: (stop.hideMarker === true || stop.hideMarker === 'true')
             });
         }
@@ -65,7 +61,7 @@ function groupCloseLocations(stops, tolerance = 15) {
     return clusters;
 }
 
-// 3. UI: Update Summary
+// 3. UI: Update Summary Box
 function updateRouteSummary(km, minutes) {
     const summaryBox = document.getElementById("route-summary");
     const summaryText = document.getElementById("summary-text");
@@ -133,13 +129,14 @@ window.initMap = async function() {
     }
 };
 
-// 5. DATA HANDLER
+// 5. DATA HANDLER: Receive Data from Flutter
 window.setRouteData = function(routeArray, availableArray) {
     if (!mapReady) {
         window.pendingData = { route: routeArray, available: availableArray };
         return;
     }
 
+    // Reset Map
     window.routeMarkers.forEach(obj => obj.marker.map = null);
     window.availableMarkers.forEach(obj => obj.marker.map = null);
     window.routeMarkers = [];
@@ -170,7 +167,6 @@ window.setRouteData = function(routeArray, availableArray) {
         return { marker, pin, names: studentNames, html: html, lat: pos.lat, lng: pos.lng };
     };
 
-    // Use the Updated Grouping Logic
     const routeClusters = groupCloseLocations(routeArray);
     const availableClusters = groupCloseLocations(availableArray);
 
@@ -182,13 +178,11 @@ window.setRouteData = function(routeArray, availableArray) {
         let color = "#1a73e8"; 
         let initialText = "...";
 
-        // Logic to determine color/label
         if (cluster.isStart) {
             color = "#00c853"; initialText = "S";
         } else if (cluster.isFinal) {
             color = "#d50000"; initialText = "E";
         } else if (cluster.stopType === 'assistant') {
-            // Force Assistant Color even if a student is in the group
             color = cluster.timeShift === 'AM' ? "#00c853" : "#d50000"; 
             initialText = cluster.timeShift === 'AM' ? "A" : "P";
         }
@@ -220,62 +214,90 @@ window.setRouteData = function(routeArray, availableArray) {
     }
 };
 
-// 6. ROUTE CALCULATION (With Logic for Assistant Sandwich)
+// 6. ROUTE CALCULATION (The "Two-Step" Fix)
 function calculateRoadRoute(clusters) {
     const startPoint = clusters.find(c => c.isStart);
     const endPoint = clusters.find(c => c.isFinal);
     if (!startPoint || !endPoint) return;
 
-    // Identify Assistants
     const assistantAM = clusters.find(c => c.stopType === 'assistant' && c.timeShift === 'AM');
     const assistantPM = clusters.find(c => c.stopType === 'assistant' && c.timeShift === 'PM');
 
-    // Create a list of students that EXCLUDES the Start, End, and Assistants
+    // Filter Students ONLY (Exclude Start, End, and Assistants)
     const studentStops = clusters.filter(c => 
-        c !== startPoint && 
-        c !== endPoint && 
-        c !== assistantAM && 
-        c !== assistantPM
+        c !== startPoint && c !== endPoint && c !== assistantAM && c !== assistantPM
     );
 
-    let finalWaypoints = [];
-
-    // 1. Force Assistant AM to be the first waypoint
-    if (assistantAM) {
-        finalWaypoints.push({ location: { lat: assistantAM.lat, lng: assistantAM.lng }, stopover: true });
+    // If no students, just draw the fixed path
+    if (studentStops.length === 0) {
+        let waypoints = [];
+        if (assistantAM) waypoints.push({ location: {lat: assistantAM.lat, lng: assistantAM.lng}, stopover: true });
+        if (assistantPM) waypoints.push({ location: {lat: assistantPM.lat, lng: assistantPM.lng}, stopover: true });
+        renderFinalRoute(startPoint, endPoint, waypoints);
+        return;
     }
 
-    // 2. Add all students
-    studentStops.forEach(s => {
-        finalWaypoints.push({ location: { lat: s.lat, lng: s.lng }, stopover: true });
-    });
-
-    // 3. Force Assistant PM to be the last waypoint
-    if (assistantPM) {
-        finalWaypoints.push({ location: { lat: assistantPM.lat, lng: assistantPM.lng }, stopover: true });
-    }
+    // STEP 1: Optimize STUDENTS ONLY
+    // We calculate the best path starting from the Assistant (or Start) through the students
+    const virtualOrigin = assistantAM || startPoint;
+    const virtualDest = assistantPM || endPoint;
 
     directionsService.route({
-        origin: { lat: startPoint.lat, lng: startPoint.lng },
-        destination: { lat: endPoint.lat, lng: endPoint.lng },
-        waypoints: finalWaypoints,
+        origin: { lat: virtualOrigin.lat, lng: virtualOrigin.lng },
+        destination: { lat: virtualDest.lat, lng: virtualDest.lng },
+        waypoints: studentStops.map(s => ({ location: { lat: s.lat, lng: s.lng }, stopover: true })),
         travelMode: google.maps.TravelMode.DRIVING,
-        // Google optimizes the *middle* content. 
-        // By structuring the array [AsstAM, ...Students, AsstPM], we give Google the strongest hint possible.
-        optimizeWaypoints: true, 
+        optimizeWaypoints: true, // Let Google shuffle the students
+    }, (result, status) => {
+        if (status === "OK") {
+            // STEP 2: Reconstruct the Perfect Route (Locked)
+            const optimizedOrder = result.routes[0].waypoint_order;
+            const sortedStudents = optimizedOrder.map(index => studentStops[index]);
+
+            const finalWaypoints = [];
+            
+            // 1. Assistant AM (Fixed)
+            if (assistantAM) {
+                finalWaypoints.push({ location: { lat: assistantAM.lat, lng: assistantAM.lng }, stopover: true });
+            }
+
+            // 2. Students (Optimized Order)
+            sortedStudents.forEach(s => {
+                finalWaypoints.push({ location: { lat: s.lat, lng: s.lng }, stopover: true });
+            });
+
+            // 3. Assistant PM (Fixed)
+            if (assistantPM) {
+                finalWaypoints.push({ location: { lat: assistantPM.lat, lng: assistantPM.lng }, stopover: true });
+            }
+
+            // Render it with optimization turned OFF
+            renderFinalRoute(startPoint, endPoint, finalWaypoints);
+        }
+    });
+}
+
+function renderFinalRoute(start, end, waypoints) {
+    directionsService.route({
+        origin: { lat: start.lat, lng: start.lng },
+        destination: { lat: end.lat, lng: end.lng },
+        waypoints: waypoints,
+        travelMode: google.maps.TravelMode.DRIVING,
+        optimizeWaypoints: false, // DO NOT TOUCH THE ORDER
     }, (result, status) => {
         if (status === "OK") {
             directionsRenderer.setDirections(result);
             const route = result.routes[0];
-            const order = route.waypoint_order; 
 
-            // Map the optimized order back to our marker numbers
-            order.forEach((originalIdx, stepIdx) => {
-                const latLng = finalWaypoints[originalIdx].location;
-                const stopNum = (stepIdx + 1).toString();
+            // Update markers sequentially (since order is now fixed)
+            waypoints.forEach((wp, index) => {
+                const stopNum = (index + 1).toString();
+                const lat = wp.location.lat;
+                
+                // Find marker roughly at this location
                 const markerObj = window.routeMarkers.find(m => 
-                    Math.abs(m.lat - latLng.lat) < 0.0001 && 
-                    Math.abs(m.lng - latLng.lng) < 0.0001
+                    Math.abs(m.lat - lat) < 0.0001 && 
+                    Math.abs(m.lng - wp.location.lng) < 0.0001
                 );
                 if (markerObj && markerObj.pin) {
                     markerObj.pin.glyphText = stopNum;
