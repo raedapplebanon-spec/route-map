@@ -6,7 +6,7 @@ let directionsRenderer;
 let mapReady = false;
 let pendingData = null;
 let isFirstLoad = true;
-let infoWindow; // Global infoWindow to reuse
+let infoWindow; 
 
 const MY_MAP_ID = "48c2bb983bd19c1c44d95cb7";
 
@@ -53,7 +53,8 @@ function updateRouteSummary(km, minutes) {
   const summaryText = document.getElementById("summary-text");
   if (summaryBox && summaryText) {
     summaryBox.classList.remove("hidden");
-    summaryText.innerHTML = المسافة: <b>${km} كم</b><br>الوقت: <b>${minutes} دقيقة</b>;
+    // FIXED: Added backticks
+    summaryText.innerHTML = `المسافة: <b>${km} كم</b><br>الوقت: <b>${minutes} دقيقة</b>`;
   }
 }
 
@@ -62,9 +63,7 @@ async function initMap() {
   const { AdvancedMarkerElement, PinElement } = await google.maps.importLibrary("marker");
   const { SearchBox } = await google.maps.importLibrary("places");
 
-  // Fix: Access ControlPosition from the main google.maps object
   const ControlPosition = google.maps.ControlPosition;
-
   infoWindow = new google.maps.InfoWindow();
 
   map = new Map(document.getElementById("map"), {
@@ -75,15 +74,11 @@ async function initMap() {
     streetViewControl: true,
   });
 
-  // --- Search Logic ---
   const input = document.getElementById("pac-input");
   const searchBox = new SearchBox(input);
 
-  // Use a safety check to prevent the crash
   if (ControlPosition && ControlPosition.TOP_LEFT) {
     map.controls[ControlPosition.TOP_LEFT].push(input);
-  } else {
-    console.error("Could not find ControlPosition. Check your API version.");
   }
 
   searchBox.addListener("places_changed", () => {
@@ -113,7 +108,6 @@ async function initMap() {
     }
   });
 
-  // This part will now run because the crash above is fixed!
   directionsService = new google.maps.DirectionsService();
   directionsRenderer = new google.maps.DirectionsRenderer({
     map: map,
@@ -128,17 +122,20 @@ async function initMap() {
     pendingData = null;
   }
 }
+
 function setRouteData(routeArray, availableArray) {
   if (!mapReady) {
     pendingData = { route: routeArray, available: availableArray };
     return;
   }
 
-  routeMarkers.forEach(obj => obj.marker.map = null);
-  availableMarkers.forEach(obj => obj.marker.map = null);
+  // FIXED: Proper map removal for Advanced Markers
+  routeMarkers.forEach(obj => { obj.marker.map = null; });
+  availableMarkers.forEach(obj => { obj.marker.map = null; });
   routeMarkers = [];
   availableMarkers = [];
-  directionsRenderer.setDirections({ routes: [] });
+  
+  if(directionsRenderer) directionsRenderer.setDirections({ routes: [] });
 
   const bounds = new google.maps.LatLngBounds();
 
@@ -162,7 +159,6 @@ function setRouteData(routeArray, availableArray) {
       infoWindow.open(map, marker);
     });
 
-    // Store names and html for the search feature
     return { marker, pin, names: studentNames, html: html, lat: pos.lat, lng: pos.lng };
   };
 
@@ -178,10 +174,11 @@ function setRouteData(routeArray, availableArray) {
     let initialText = cluster.isStart ? "S" : (cluster.isFinal ? "E" : "...");
     let namesArr = cluster.items.map(x => x.studentName || x.label || "طالب");
 
-    let html = <div style="color:black;text-align:right;direction:rtl;min-width:150px;">;
-    html += <b style="color:${color};">${cluster.isStart ? "نقطة البداية" : (cluster.isFinal ? "نقطة النهاية" : "محطة توقف")}</b><hr style="margin:5px 0;">;
-    namesArr.forEach(name => { html += <div style="margin-bottom:4px;">• <b>${name}</b></div>; });
-    html += </div>;
+    // FIXED: Added backticks
+    let html = `<div style="color:black;text-align:right;direction:rtl;min-width:150px;">`;
+    html += `<b style="color:${color};">${cluster.isStart ? "نقطة البداية" : (cluster.isFinal ? "نقطة النهاية" : "محطة توقف")}</b><hr style="margin:5px 0;">`;
+    namesArr.forEach(name => { html += `<div style="margin-bottom:4px;">• <b>${name}</b></div>`; });
+    html += `</div>`;
 
     const markerObj = addMarker(pos, "route", html, color, initialText, namesArr);
     routeMarkers.push(markerObj);
@@ -193,12 +190,13 @@ function setRouteData(routeArray, availableArray) {
     bounds.extend(pos);
     let namesArr = cluster.items.map(x => x.studentName);
 
-    let html = <div style="color:black;text-align:right;direction:rtl;min-width:150px;">;
-    html += <b style="color:#ff9100;">خارج الجولة (${cluster.items.length})</b><hr style="margin:5px 0;">;
+    // FIXED: Added backticks
+    let html = `<div style="color:black;text-align:right;direction:rtl;min-width:150px;">`;
+    html += `<b style="color:#ff9100;">خارج الجولة (${cluster.items.length})</b><hr style="margin:5px 0;">`;
     cluster.items.forEach(x => {
-      html += <div style="margin-bottom:8px;">👨‍🎓 <b>${x.studentName}</b><br><small>${x.gradeName}</small></div>;
+      html += `<div style="margin-bottom:8px;">👨‍🎓 <b>${x.studentName}</b><br><small>${x.gradeName}</small></div>`;
     });
-    html += </div>;
+    html += `</div>`;
 
     const mObj = addMarker(pos, "available", html, "#ff9100", cluster.items.length.toString(), namesArr);
     availableMarkers.push(mObj);
