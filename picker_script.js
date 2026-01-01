@@ -1,19 +1,18 @@
 // --- Globals ---
-let map, marker, geocoder;
+let map, marker, geocoder, autocomplete;
 
-// 1. ATTACH IMMEDIATELY
 window.initPickerMap = async function() {
   try {
-    // Load Libraries
+    // 1. Load Libraries
     await google.maps.importLibrary("maps");
     await google.maps.importLibrary("marker");
     await google.maps.importLibrary("places");
     await google.maps.importLibrary("geocoding");
 
     geocoder = new google.maps.Geocoder();
-
     const defaultPos = { lat: 32.0280, lng: 35.7043 };
-    
+
+    // 2. Initialize Map
     map = new google.maps.Map(document.getElementById("map"), {
       center: defaultPos,
       zoom: 15,
@@ -22,6 +21,7 @@ window.initPickerMap = async function() {
       streetViewControl: false
     });
 
+    // 3. Initialize Marker
     marker = new google.maps.marker.AdvancedMarkerElement({
       map: map,
       position: defaultPos,
@@ -29,43 +29,53 @@ window.initPickerMap = async function() {
       title: "Move to select location"
     });
 
-    // 2. SETUP SEARCH
-    // Since we switched HTML to v=beta, we can just grab the element directly!
-    const autocompleteWidget = document.getElementById("pac-input");
+    // 4. SETUP SEARCH (The Standard Way)
+    const input = document.getElementById("pac-input");
     
-    // Add to Map UI (Top Left)
-    map.controls[google.maps.ControlPosition.TOP_LEFT].push(autocompleteWidget);
+    // Create the Autocomplete object
+    autocomplete = new google.maps.places.Autocomplete(input);
+    autocomplete.bindTo("bounds", map);
 
-    // 3. LISTENERS
+    // Push to top-left controls
+    map.controls[google.maps.ControlPosition.TOP_LEFT].push(input);
 
-    // A. Search Box Listener
-    autocompleteWidget.addEventListener('gmp-placeselect', async (e) => {
-      const place = e.detail.place;
-      
-      // Ensure geometry is fetched
-      if (!place.geometry) {
-        await place.fetchFields({ fields: ['geometry', 'location', 'formatted_address'] });
+    // 5. LISTENERS
+
+    // A. Search Box Listener (Standard 'place_changed' event)
+    autocomplete.addListener("place_changed", () => {
+      const place = autocomplete.getPlace();
+
+      if (!place.geometry || !place.geometry.location) {
+        // User entered the name of a Place that was not suggested
+        window.alert("No details available for input: '" + place.name + "'");
+        return;
       }
 
-      if (place.geometry && place.geometry.location) {
-        const pos = place.geometry.location;
-        map.setCenter(pos);
-        marker.position = pos;
+      // If the place has a geometry, then present it on a map.
+      if (place.geometry.viewport) {
+        map.fitBounds(place.geometry.viewport);
+      } else {
+        map.setCenter(place.geometry.location);
         map.setZoom(17);
-        sendToFlutter(pos.lat(), pos.lng());
-        
-        // Update visual text
-        if (place.formatted_address) {
-            autocompleteWidget.value = place.formatted_address;
-        }
       }
+
+      marker.position = place.geometry.location;
+      
+      // Send data to Flutter
+      sendToFlutter(place.geometry.location.lat(), place.geometry.location.lng());
     });
 
     // B. Marker Drag Listener
     marker.addListener("dragend", () => {
       const pos = marker.position;
-      sendToFlutter(pos.lat, pos.lng);
-      reverseGeocode(pos);
+      // Note: AdvancedMarker returns lat/lng as plain numbers or null, check access
+      // If using AdvancedMarkerElement, position is often LatLng object, or {lat, lng} interface
+      // Safest way to read:
+      const lat = (typeof pos.lat === 'function') ? pos.lat() : pos.lat;
+      const lng = (typeof pos.lng === 'function') ? pos.lng() : pos.lng;
+      
+      sendToFlutter(lat, lng);
+      reverseGeocode({ lat, lng });
     });
 
     // C. Map Click Listener
@@ -109,10 +119,10 @@ function reverseGeocode(latLng) {
   if (!geocoder) return;
   geocoder.geocode({ location: latLng }, (results, status) => {
     if (status === "OK" && results[0]) {
-      const widget = document.getElementById("pac-input");
-      if (widget) {
-          widget.value = results[0].formatted_address;
-      }
+       const input = document.getElementById("pac-input");
+       if (input) {
+           input.value = results[0].formatted_address;
+       }
     }
   });
 }
@@ -123,11 +133,12 @@ function sendToFlutter(lat, lng) {
   if (window.FlutterChan) {
     window.FlutterChan.postMessage(JSON.stringify(data));
   } else {
+    // Fallback for iframe/web
     window.parent.postMessage(data, "*");
   }
 }
 
 // Safety Trigger
 if (typeof google !== 'undefined' && google.maps) {
-    window.initPickerMap();
+   // window.initPickerMap(); // Usually callback handles this, but keep if needed
 }
