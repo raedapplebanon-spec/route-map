@@ -1,8 +1,9 @@
 let map, marker, geocoder;
 
+// 1. ATTACH IMMEDIATELY: Define function globally so Google can find it
 window.initPickerMap = async function() {
   try {
-    // 1. Load Libraries
+    // Load Libraries
     await google.maps.importLibrary("maps");
     await google.maps.importLibrary("marker");
     await google.maps.importLibrary("places");
@@ -16,25 +17,28 @@ window.initPickerMap = async function() {
       center: defaultPos,
       zoom: 15,
       mapId: "48c2bb983bd19c1c44d95cb7",
+      mapTypeControl: false,
+      streetViewControl: false
     });
 
     marker = new google.maps.marker.AdvancedMarkerElement({
       map: map,
       position: defaultPos,
       gmpDraggable: true,
+      title: "Move to select location"
     });
 
     // 2. Setup the NEW 2025 Autocomplete Component
     const autocompleteWidget = document.getElementById("pac-input");
     
-    // Add to Map UI
+    // Add to Map UI (Top Left)
     map.controls[google.maps.ControlPosition.TOP_LEFT].push(autocompleteWidget);
 
-    // Modern Listener for the new component
+    // Modern Listener: When user selects a place from the dropdown
     autocompleteWidget.addEventListener('gmp-placeselect', async (e) => {
       const place = e.detail.place;
 
-      // Ensure geometry is fetched (Standard for the new component)
+      // Ensure geometry is fetched
       if (!place.geometry) {
         await place.fetchFields({ fields: ['geometry', 'location', 'formatted_address'] });
       }
@@ -48,7 +52,7 @@ window.initPickerMap = async function() {
       }
     });
 
-    // 3. Manual Pin Listeners
+    // 3. Manual Pin Listeners (Drag & Click)
     marker.addListener("dragend", () => {
       const pos = marker.position;
       sendToFlutter(pos.lat, pos.lng);
@@ -62,48 +66,64 @@ window.initPickerMap = async function() {
       reverseGeocode(pos);
     });
 
-    console.log("✅ Map Initialized with 2025 PlaceAutocompleteElement");
+    console.log("✅ Picker Map Initialized Successfully");
+
   } catch (e) {
     console.error("❌ Map Initialization Failed:", e);
   }
 };
 
-// --- EDIT HANDLER ---
+// --- EDIT HANDLER: For when you open the map to edit an existing location ---
 window.addEventListener("message", (event) => {
   if (event.data.action === "setInitialPos") {
     const lat = parseFloat(event.data.lat);
     const lng = parseFloat(event.data.lng);
+    
+    // Safety check for invalid 0,0 coordinates
     if (lat && lat !== 0) {
       const pos = { lat, lng };
-      if (map && marker) {
-        map.setCenter(pos);
-        marker.position = pos;
-        map.setZoom(17);
-      }
+      // Wait for map to exist before setting
+      const checkMapInterval = setInterval(() => {
+         if (map && marker) {
+             clearInterval(checkMapInterval);
+             map.setCenter(pos);
+             marker.position = pos;
+             map.setZoom(17);
+             reverseGeocode(pos); // Also update the text box
+         }
+      }, 100);
     }
   }
 });
 
+// Update the Search Box text when pin is moved manually
 function reverseGeocode(latLng) {
+  if (!geocoder) return;
   geocoder.geocode({ location: latLng }, (results, status) => {
     if (status === "OK" && results[0]) {
-       // Since the new widget handles its own input, we don't strictly need to 
-       // update the text value manually, but it's good for UX.
-       const widget = document.getElementById("pac-input");
-       // Note: the widget might require internal value setting depending on browser
+      const widget = document.getElementById("pac-input");
+      if (widget) {
+          // This line updates the new Google widget text
+          widget.value = results[0].formatted_address;
+      }
     }
   });
 }
 
+// Send data back to Flutter
 function sendToFlutter(lat, lng) {
   const data = { action: "locationPicked", lat: lat, lng: lng };
+  // Windows Support
   if (window.FlutterChan) {
     window.FlutterChan.postMessage(JSON.stringify(data));
-  } else {
+  } 
+  // Web Support
+  else {
     window.parent.postMessage(data, "*");
   }
 }
 
+// Safety Trigger: In case API loaded before this script
 if (typeof google !== 'undefined' && google.maps) {
     window.initPickerMap();
 }
