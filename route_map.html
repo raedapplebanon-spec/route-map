@@ -4,84 +4,111 @@
   <meta charset="UTF-8" />
   <title>Route Map</title>
 
-  <link rel="stylesheet" href="https://raedapplebanon-spec.github.io/route-map/style.css?v=3" />
+  <link rel="stylesheet" href="style.css" />
   
-  <script src="https://raedapplebanon-spec.github.io/route-map/map_script.js?v=8"></script>
+  <style>
+    /* 1. Basic Setup */
+    html, body { height: 100%; margin: 0; padding: 0; font-family: 'Segoe UI', Arial, sans-serif; }
+    #map { height: 100%; width: 100%; }
 
- <script
-  src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCYaJ4Gjq36mq8swYgjNXOYr5mKZi45niA&callback=initMap&libraries=marker,places&loading=async&v=weekly"
-  async defer>
-</script>
+    /* 2. Search Bar Styling (Classic Input) */
+    #pac-input {
+      background-color: #fff;
+      font-family: 'Segoe UI', Arial, sans-serif;
+      font-size: 15px;
+      font-weight: 400;
+      margin: 10px;
+      padding: 0 13px;
+      width: 300px;
+      height: 40px;
+      border: 1px solid #dadce0;
+      border-radius: 2px;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+      outline: none;
+      display: none; /* Hidden until map loads it */
+    }
+
+    /* 3. Route Summary Box */
+    .route-summary {
+      position: absolute;
+      bottom: 25px; 
+      left: 15px;
+      background: white; 
+      padding: 14px 18px;
+      border-radius: 12px; 
+      box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+      font-size: 14px; 
+      line-height: 1.5;
+      direction: rtl; 
+      text-align: right; 
+      z-index: 10;
+      min-width: 160px; 
+      border: 1px solid #eee;
+    }
+    .route-summary h3 {
+      color: #1a73e8; 
+      border-bottom: 1px solid #eee;
+      padding-bottom: 5px; 
+      margin: 0 0 8px 0;
+      font-size: 15px;
+    }
+    .hidden { display: none; }
+    
+    /* 4. Legend Styling (If not in style.css) */
+    .legend {
+      background: rgba(255, 255, 255, 0.95);
+      padding: 10px 14px;
+      border-radius: 8px;
+      font-size: 12px;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.25);
+      margin-bottom: 25px; margin-right: 10px; /* Adjust based on position */
+    }
+    .legend-row { display: flex; align-items: center; margin-bottom: 6px; }
+    .legend-color { width: 14px; height: 14px; border-radius: 50%; margin-left: 6px; }
+  </style>
+
+  <script src="map_script.js"></script>
+</head>
+
+<body>
+  <input id="pac-input" type="text" placeholder="ابحث عن عنوان أو اسم طالب..." />
+  
+  <div id="map"></div>
+
+  <div id="legend" class="legend" style="display:none;"> <div class="legend-row"><div class="legend-color" style="background:#00c853"></div><span>البداية (Start)</span></div>
+    <div class="legend-row"><div class="legend-color" style="background:#d50000"></div><span>النهاية (End)</span></div>
+    <div class="legend-row"><div class="legend-color" style="background:#9C27B0"></div><span>المرافق (Escort)</span></div>
+    <div class="legend-row"><div class="legend-color" style="background:#1a73e8"></div><span>طلاب داخل الجولة</span></div>
+    <div class="legend-row"><div class="legend-color" style="background:#ff9100"></div><span>طلاب بدون جولات</span></div>
+  </div>
+
+  <div id="route-summary" class="route-summary hidden">
+    <h3>📍 ملخص الجولة</h3>
+    <div id="summary-text">—</div>
+  </div>
 
   <script>
-    // Listener for Flutter Data
     window.addEventListener("message", function (event) {
       if (!event.data || event.data.action !== "setRouteData") return;
       
       const routeData = event.data.routeData || [];
       const availableData = event.data.availableData || [];
       
-      console.log("📩 Received from Flutter:", routeData, availableData);
+      console.log("📩 Data Received:", routeData.length, "Route Items,", availableData.length, "Available Items");
 
-      if (window.setRouteData) {
+      // Pass data to the main script
+      if (typeof window.setRouteData === 'function') {
         window.setRouteData(routeData, availableData);
       } else {
-        console.warn("⚠️ Script not ready, saving data for later...");
+        console.warn("⚠️ Map script not ready yet. Queuing data.");
         window.pendingData = { route: routeData, available: availableData };
       }
     });
   </script>
 
-  <style>
-    /* 2025 Google Component Style */
-    gmpx-place-autocomplete {
-      background-color: #fff;
-      font-family: 'Segoe UI', Arial, sans-serif;
-      margin: 10px;
-      width: 280px;
-      height: 45px;
-      border-radius: 8px;
-      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-      z-index: 10;
-    }
-
-    .route-summary {
-      position: absolute;
-      bottom: 25px; left: 15px;
-      background: white; padding: 14px 18px;
-      border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.2);
-      font-size: 14px; line-height: 1.5;
-      direction: rtl; text-align: right; z-index: 9999;
-      min-width: 160px; border: 1px solid #eee;
-    }
-    .route-summary h3 {
-      color: #1a73e8; border-bottom: 1px solid #eee;
-      padding-bottom: 5px; margin-bottom: 8px;
-    }
-    .hidden { display: none; }
-    #map { height: 100vh; width: 100%; }
-  </style>
-</head>
-
-<body>
-  <gmpx-place-autocomplete id="pac-input" placeholder="ابحث عن عنوان أو اسم طالب..."></gmpx-place-autocomplete>
-  
-  <div id="map"></div>
-
-  <div class="legend">
-    <div class="legend-row"><div class="legend-color" style="background:#00c853"></div><span>البداية</span></div>
-    <div class="legend-row"><div class="legend-color" style="background:#d50000"></div><span>النهاية</span></div>
-    
-    <div class="legend-row"><div class="legend-color" style="background:#9C27B0"></div><span>المرافق</span></div>
-    
-    <div class="legend-row"><div class="legend-color" style="background:#1a73e8"></div><span>طلاب داخل الجولة</span></div>
-    <div class="legend-row"><div class="legend-color" style="background:#ff9100"></div><span>طلاب بدون جولات</span></div>
-  </div>
-
-  <div id="route-summary" class="route-summary hidden">
-    <h3 style="margin:0; font-size:15px;">📍 ملخص الجولة</h3>
-    <div id="summary-text">—</div>
-  </div>
+  <script
+    src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCYaJ4Gjq36mq8swYgjNXOYr5mKZi45niA&callback=initMap&libraries=marker,places,geometry&loading=async&v=weekly"
+    async defer>
+  </script>
 </body>
 </html>
-
