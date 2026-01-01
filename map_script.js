@@ -217,27 +217,40 @@ function calculateRoadRoute(clusters) {
   const endStop = clusters.find(c => c.isFinal);
   if (!startStop || !endStop) return;
 
-  const waypointClusters = clusters.filter(c => !c.isStart && !c.isFinal);
+  // ⭐ Only students are optimized
+  const waypointClusters = clusters.filter(c =>
+    !c.isStart &&
+    !c.isFinal &&
+    c.items.some(x => x.stopType === "student")
+  );
 
   directionsService.route({
     origin: { lat: startStop.lat, lng: startStop.lng },
     destination: { lat: endStop.lat, lng: endStop.lng },
-    waypoints: waypointClusters.map(c => ({ location: { lat: c.lat, lng: c.lng }, stopover: true })),
+    waypoints: waypointClusters.map(c => ({
+      location: { lat: c.lat, lng: c.lng },
+      stopover: true
+    })),
     travelMode: google.maps.TravelMode.DRIVING,
     optimizeWaypoints: true,
   }, (result, status) => {
     if (status === "OK") {
       directionsRenderer.setDirections(result);
-      const optimizedOrder = result.routes[0].waypoint_order; 
+
+      const optimizedOrder = result.routes[0].waypoint_order;
+
       optimizedOrder.forEach((originalIndex, stepIndex) => {
         const clusterData = waypointClusters[originalIndex];
         const stopNum = (stepIndex + 1).toString();
-        const markerObj = routeMarkers.find(m => 
-          Math.abs(m.lat - clusterData.lat) < 0.0001 && 
+
+        const markerObj = routeMarkers.find(m =>
+          Math.abs(m.lat - clusterData.lat) < 0.0001 &&
           Math.abs(m.lng - clusterData.lng) < 0.0001
         );
+
         if (markerObj) markerObj.pin.glyphText = stopNum;
       });
+
       const route = result.routes[0];
       let dist = 0, dur = 0;
       route.legs.forEach(leg => { dist += leg.distance.value; dur += leg.duration.value; });
@@ -248,5 +261,6 @@ function calculateRoadRoute(clusters) {
 
 window.initMap = initMap;
 window.setRouteData = setRouteData;
+
 
 
