@@ -4,35 +4,38 @@
   <meta charset="UTF-8">
   <title>Location Picker</title>
   <style>
-    html, body, #map { height: 100%; margin: 0; padding: 0; }
-    
-    /* FIX: Float the search bar in the Top Center */
+    /* 1. Map fills the screen */
+    html, body { height: 100%; margin: 0; padding: 0; font-family: 'Segoe UI', Arial, sans-serif; }
+    #map { height: 100%; width: 100%; }
+
+    /* 2. THE FIX: Center the search bar perfectly at the top */
+    /* This 'absolute' position means it floats freely, ignoring map corners */
     gmp-place-autocomplete {
       position: absolute;
       top: 20px;
       left: 50%;
-      transform: translateX(-50%); /* Centers the element */
-      width: 300px;
-      z-index: 99; /* Ensures it stays on top of the map */
+      transform: translateX(-50%); /* This forces it to the exact center */
+      width: 320px;
+      z-index: 9999; /* Stays on top of map */
       background: white;
       border-radius: 8px;
-      box-shadow: 0 4px 10px rgba(0,0,0,0.2);
+      box-shadow: 0 4px 12px rgba(0,0,0,0.2);
     }
     
-    /* Style the internal input text */
+    /* Internal styling for the input text */
     gmp-place-autocomplete::part(input) {
-      padding: 10px;
-      font-family: 'Segoe UI', Arial, sans-serif;
+      padding: 12px;
+      font-size: 16px;
     }
   </style>
-
+  
   <script src="picker_script.js"></script>
 </head>
 <body>
 
   <gmp-place-autocomplete 
       id="pac-input" 
-      placeholder="ابحث عن موقع...">
+      placeholder="ابحث عن موقع (Search)...">
   </gmp-place-autocomplete>
 
   <div id="map"></div>
@@ -43,4 +46,3 @@
   </script>
 </body>
 </html>
-
