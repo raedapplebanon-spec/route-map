@@ -29,15 +29,29 @@ window.initPickerMap = async function() {
       title: "Move to select location"
     });
 
-    // 2. CREATE the Search Component Programmatically
-    // This creates the new 2025 widget
-    autocomplete = new PlaceAutocompleteElement();
-    autocomplete.id = "pac-input"; // Apply the ID for CSS styling
-    // Note: 'placeholder' property might not be directly supported on the class in all versions, 
-    // but the component renders its own internal text.
+    // 2. CREATE the Search Component
+    // We create a container DIV to force the layout style
+    const searchContainer = document.createElement("div");
+    searchContainer.style.margin = "10px";
+    searchContainer.style.zIndex = "1"; // Ensure it sits on top
 
-    // Add to Map UI (Top Left)
-    map.controls[google.maps.ControlPosition.TOP_LEFT].push(autocomplete.element);
+    // Create the Google Autocomplete Element
+    autocomplete = new PlaceAutocompleteElement();
+    
+    // ⭐ CRITICAL FIX: Apply the ID to the ACTUAL DOM Element
+    autocomplete.element.id = "pac-input";
+    
+    // ⭐ FORCE STYLING: Ensure it has width and background
+    autocomplete.element.style.width = "300px";
+    autocomplete.element.style.backgroundColor = "white";
+    autocomplete.element.style.borderRadius = "8px";
+    autocomplete.element.style.boxShadow = "0 2px 6px rgba(0,0,0,0.3)";
+
+    // Put the widget inside our container
+    searchContainer.appendChild(autocomplete.element);
+
+    // Add the Container to the Map UI (Top Left)
+    map.controls[google.maps.ControlPosition.TOP_LEFT].push(searchContainer);
 
     // 3. LISTENERS
 
@@ -63,8 +77,6 @@ window.initPickerMap = async function() {
     marker.addListener("dragend", () => {
       const pos = marker.position;
       sendToFlutter(pos.lat, pos.lng);
-      // Optional: Try to update text (Note: The new widget is often read-only for programatic text updates)
-      // reverseGeocode(pos); 
     });
 
     // C. Map Click Listener
@@ -72,7 +84,6 @@ window.initPickerMap = async function() {
       const pos = e.latLng;
       marker.position = pos;
       sendToFlutter(pos.lat(), pos.lng());
-      // reverseGeocode(pos);
     });
 
     console.log("✅ Picker Map Initialized Successfully");
@@ -101,15 +112,6 @@ window.addEventListener("message", (event) => {
     }
   }
 });
-
-/* Note: The new PlaceAutocompleteElement does not easily support 
-   setting the text value arbitrarily (like '32.55, 35.66') via JS 
-   because it expects a Place object. We rely on the marker for visual feedback.
-*/
-function reverseGeocode(latLng) {
-  // Logic reserved for standard input boxes. 
-  // The new 2025 widget manages its own state strictly.
-}
 
 // Send data back to Flutter
 function sendToFlutter(lat, lng) {
