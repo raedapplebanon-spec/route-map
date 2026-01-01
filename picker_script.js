@@ -16,7 +16,7 @@ window.initPickerMap = async function() {
     map = new google.maps.Map(document.getElementById("map"), {
       center: defaultPos,
       zoom: 15,
-      mapId: "48c2bb983bd19c1c44d95cb7", // Ensure this Map ID is valid in your console
+      mapId: "48c2bb983bd19c1c44d95cb7",
       mapTypeControl: false,
       streetViewControl: false
     });
@@ -37,44 +37,51 @@ window.initPickerMap = async function() {
 
     // 5. LISTENER: HANDLES THE JUMP
     autocompleteComponent.addEventListener('gmp-placeselect', async ({ detail }) => {
-      const place = detail.place;
       
-      console.log("📍 Place selected:", place); // Debug Log
+      // 👇 NEW: Error trapping to see why it fails
+      try {
+          const place = detail.place;
+          
+          if (!place) {
+            alert("❌ System Error: Place object is missing.");
+            return;
+          }
 
-      // Fetch the specific fields we need for the jump
-      await place.fetchFields({ 
-        fields: ['location', 'displayName', 'formattedAddress', 'viewport'] 
-      });
+          // Fetch fields (This is usually where it fails if API is blocked)
+          await place.fetchFields({ 
+            fields: ['location', 'displayName', 'formattedAddress', 'viewport'] 
+          });
 
-      console.log("📍 Location data fetched:", place.location); // Debug Log
+          // Check if location exists
+          if (!place.location) {
+            alert("⚠️ No coordinates found for this place. Please try a different specific location.");
+            return;
+          }
 
-      // IF NO LOCATION, STOP
-      if (!place.location) {
-        console.error("❌ No location found for this place!");
-        return;
+          // MOVE THE MAP
+          if (place.viewport) {
+            map.fitBounds(place.viewport);
+          } else {
+            map.setCenter(place.location);
+            map.setZoom(17);
+          }
+
+          // MOVE THE MARKER
+          marker.position = place.location;
+
+          // Send data
+          sendToFlutter(place.location.lat, place.location.lng);
+
+      } catch (error) {
+          // 🚨 THIS ALERT WILL TELL US THE REAL PROBLEM
+          console.error(error);
+          alert("❌ Error fetching location: " + error.message + "\n\nCheck your console for details.");
       }
-
-      // STEP A: MOVE THE MAP
-      if (place.viewport) {
-        // If the place is a city or region, zoom to fit the area
-        map.fitBounds(place.viewport);
-      } else {
-        // If it's a specific building, jump directly to it
-        map.setCenter(place.location);
-        map.setZoom(17);
-      }
-
-      // STEP B: MOVE THE MARKER
-      marker.position = place.location;
-
-      // STEP C: SEND DATA
-      sendToFlutter(place.location.lat, place.location.lng);
     });
 
     // B. Marker Drag Listener
     marker.addListener("dragend", () => {
       const pos = marker.position;
-      // Handle different return types safely
       const lat = (typeof pos.lat === 'function') ? pos.lat() : pos.lat;
       const lng = (typeof pos.lng === 'function') ? pos.lng() : pos.lng;
       
@@ -118,7 +125,6 @@ window.addEventListener("message", (event) => {
   }
 });
 
-// Update the Search Box text when pin is moved manually
 function reverseGeocode(latLng) {
   if (!geocoder) return;
   geocoder.geocode({ location: latLng }, (results, status) => {
@@ -131,7 +137,6 @@ function reverseGeocode(latLng) {
   });
 }
 
-// Send data back to Flutter
 function sendToFlutter(lat, lng) {
   const data = { action: "locationPicked", lat: lat, lng: lng };
   if (window.FlutterChan) {
@@ -141,7 +146,6 @@ function sendToFlutter(lat, lng) {
   }
 }
 
-// Safety Trigger
 if (typeof google !== 'undefined' && google.maps) {
    // window.initPickerMap(); 
 }
