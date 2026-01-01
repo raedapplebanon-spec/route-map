@@ -1,17 +1,3 @@
-This code is **95% correct**. The logic for the "Sandwich Route" (forcing the Assistant to the start/end) is perfect.
-
-However, you missed the two **visual changes** we agreed on in the previous step:
-
-1. **Purple Color:** Your current code still sets the Assistant to Green (AM) or Red (PM). We want **Purple** so they stand out.
-2. **Student Details:** Your current code only shows the name (`x.studentName`). You asked to show **Grade and Section** as well.
-
-Here is the **Fixed `map_script.js**`. I have updated **only** the `setRouteData` function to include the Purple color and the Grade/Section details. The rest of your logic (calculations, grouping) is perfect and unchanged.
-
-### Final Corrected `map_script.js`
-
-*(Copy and replace your entire file)*
-
-```javascript
 // --- Globals ---
 window.routeMarkers = [];
 window.availableMarkers = [];
@@ -192,18 +178,21 @@ window.setRouteData = function(routeArray, availableArray) {
         let initialText = "...";
         let headerTitle = "نقطة توقف";
 
-        if (cluster.isStart) {
-            color = "#00c853"; initialText = "S"; headerTitle = "نقطة البداية";
-        } else if (cluster.isFinal) {
-            color = "#d50000"; initialText = "E"; headerTitle = "نقطة النهاية";
-        } else if (cluster.stopType === 'assistant') {
+        // Logic Priority: Assistant Logic First!
+        if (cluster.stopType === 'assistant') {
             // ⭐ FIXED: Purple for Assistant
             color = "#9C27B0"; 
             initialText = cluster.timeShift === 'AM' ? "A" : "P";
             headerTitle = "المساعد (" + cluster.timeShift + ")";
+        } 
+        else if (cluster.isStart) {
+            color = "#00c853"; initialText = "S"; headerTitle = "نقطة البداية";
+        } 
+        else if (cluster.isFinal) {
+            color = "#d50000"; initialText = "E"; headerTitle = "نقطة النهاية";
         }
 
-        // ⭐ FIXED: Show Grade & Section in InfoWindow
+        // ⭐ FIXED: Build HTML loop for Grade & Section
         let studentRows = cluster.items.map(function(x) {
             let name = x.studentName || "طالب";
             let details = (x.gradeName || "") + " " + (x.sectionName || "");
@@ -229,7 +218,7 @@ window.setRouteData = function(routeArray, availableArray) {
         const pos = { lat: cluster.lat, lng: cluster.lng };
         bounds.extend(pos);
 
-        // ⭐ FIXED: Show Grade & Section for Available Students too
+        // ⭐ FIXED: Show Grade & Section here too
         let studentRows = cluster.items.map(function(x) {
             let name = x.studentName || "طالب";
             let details = (x.gradeName || "") + " " + (x.sectionName || "");
@@ -332,5 +321,3 @@ function renderFinalRoute(start, end, waypoints) {
         }
     });
 }
-
-```
