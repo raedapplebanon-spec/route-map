@@ -189,7 +189,7 @@ window.setRouteData = function(routeArray, availableArray) {
 
         let namesArr = cluster.items.map(x => x.studentName || "طالب");
         let html = '<div style="color:black;text-align:right;direction:rtl;min-width:150px;">' +
-                   '<b style="color:' + color + '">' + (cluster.stopType === 'assistant' ? "المساعد" : "نقطة توقف") + '</b><hr>' +
+                   '<b style="color:' + color + '">' + (cluster.stopType === 'assistant' ? "المرافق" : "نقطة توقف") + '</b><hr>' +
                    namesArr.map(function(n) { return '<div>• <b>' + n + '</b></div>'; }).join('') +
                    '</div>';
 
