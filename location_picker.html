@@ -6,16 +6,16 @@
   <style>
     html, body, #map { height: 100%; margin: 0; padding: 0; }
     
-    /* Style the Native Component */
+    /* Style the Search Box */
     gmp-place-autocomplete {
       box-shadow: 0 2px 6px rgba(0,0,0,0.3);
       margin: 10px;
       width: 300px;
-      border-radius: 8px; /* Optional rounded corners */
+      border-radius: 8px;
       background: white;
     }
     
-    /* Hide the default internal input border if needed */
+    /* Style the internal input text */
     gmp-place-autocomplete::part(input) {
       padding: 10px;
       font-family: 'Segoe UI', Arial, sans-serif;
@@ -28,8 +28,7 @@
 
   <gmp-place-autocomplete 
       id="pac-input" 
-      placeholder="ابحث عن موقع..." 
-      types="geocode">
+      placeholder="ابحث عن موقع...">
   </gmp-place-autocomplete>
 
   <div id="map"></div>
