@@ -94,19 +94,29 @@ window.initPickerMap = async function() {
 };
 
 // --- EDIT HANDLER ---
+// --- EDIT HANDLER ---
 window.addEventListener("message", (event) => {
   if (event.data.action === "setInitialPos") {
     const lat = parseFloat(event.data.lat);
     const lng = parseFloat(event.data.lng);
     
-    if (lat && lat !== 0) {
-      const pos = { lat, lng };
+    // Ensure lat/lng are valid numbers
+    if (!isNaN(lat) && !isNaN(lng) && lat !== 0) {
+      const pos = { lat: lat, lng: lng };
+      
       const checkMapInterval = setInterval(() => {
+         // Check if map, marker, AND the internal position property exist
          if (map && marker) {
              clearInterval(checkMapInterval);
+             
+             // 1. Move Map
              map.setCenter(pos);
-             marker.position = pos;
              map.setZoom(17);
+             
+             // 2. Move Marker (AdvancedMarkerElement handles simple {lat, lng} objects fine)
+             marker.position = pos;
+             
+             // 3. Update Text
              reverseGeocode(pos);
          }
       }, 100);
