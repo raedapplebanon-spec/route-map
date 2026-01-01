@@ -218,20 +218,58 @@ function calculateRoadRoute(clusters) {
   const endStop = clusters.find(c => c.isFinal);
   if (!startStop || !endStop) return;
 
-  // ✅ ONLY clusters that contain at least one student are optimized
+  // ===============================
+  // ⭐ Identify assistant points
+  // ===============================
+  const assistantAM = clusters.find(c =>
+    c.items.some(x => x.stopType === "assistant" && x.timeShift === "AM")
+  );
+
+  const assistantPM = clusters.find(c =>
+    c.items.some(x => x.stopType === "assistant" && x.timeShift === "PM")
+  );
+
+  // ===============================
+  // ⭐ Only STUDENT clusters are optimized
+  // ===============================
   const waypointClusters = clusters.filter(c =>
     !c.isStart &&
     !c.isFinal &&
     c.items.some(x => x.stopType === "student")
   );
 
+  // Convert student waypoints to Google format
+  let googleWaypoints = waypointClusters.map(c => ({
+    location: { lat: c.lat, lng: c.lng },
+    stopover: true
+  }));
+
+  // ===============================
+  // ⭐ Insert assistant as FIXED waypoint
+  // ===============================
+  if (assistantAM) {
+    // Assistant appears directly AFTER start, BEFORE optimized students
+    googleWaypoints.unshift({
+      location: { lat: assistantAM.lat, lng: assistantAM.lng },
+      stopover: true
+    });
+  }
+
+  if (assistantPM) {
+    // Assistant appears directly BEFORE end, AFTER optimized students
+    googleWaypoints.push({
+      location: { lat: assistantPM.lat, lng: assistantPM.lng },
+      stopover: true
+    });
+  }
+
+  // ===============================
+  // ⭐ Call Google Directions
+  // ===============================
   directionsService.route({
     origin: { lat: startStop.lat, lng: startStop.lng },
     destination: { lat: endStop.lat, lng: endStop.lng },
-    waypoints: waypointClusters.map(c => ({
-      location: { lat: c.lat, lng: c.lng },
-      stopover: true
-    })),
+    waypoints: googleWaypoints,
     travelMode: google.maps.TravelMode.DRIVING,
     optimizeWaypoints: true,
   }, (result, status) => {
@@ -240,6 +278,7 @@ function calculateRoadRoute(clusters) {
 
       const optimizedOrder = result.routes[0].waypoint_order;
 
+      // Re-apply numbering ONLY for student clusters
       optimizedOrder.forEach((originalIndex, stepIndex) => {
         const clusterData = waypointClusters[originalIndex];
         const stopNum = (stepIndex + 1).toString();
@@ -254,6 +293,7 @@ function calculateRoadRoute(clusters) {
         }
       });
 
+      // Distance/time summary
       const route = result.routes[0];
       let dist = 0, dur = 0;
       route.legs.forEach(leg => {
@@ -267,3 +307,4 @@ function calculateRoadRoute(clusters) {
 
 window.initMap = initMap;
 window.setRouteData = setRouteData;
+
