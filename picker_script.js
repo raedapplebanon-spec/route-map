@@ -17,7 +17,13 @@ window.initPickerMap = async function() {
       center: defaultPos,
       zoom: 15,
       mapId: "48c2bb983bd19c1c44d95cb7",
-      mapTypeControl: true, // ✅ THIS ENABLES THE SATELLITE BUTTON
+      
+      // ✅ LAYOUT CONFIGURATION
+      mapTypeControl: true,
+      mapTypeControlOptions: {
+          style: google.maps.MapTypeControlStyle.HORIZONTAL_BAR,
+          position: google.maps.ControlPosition.TOP_RIGHT // Satellite button goes to Right
+      },
       streetViewControl: false,
       fullscreenControl: false
     });
@@ -29,12 +35,11 @@ window.initPickerMap = async function() {
       gmpDraggable: true
     });
 
-    // 4. SETUP SEARCH
+    // 4. SETUP SEARCH POSITION
     const searchBar = document.getElementById("pac-input");
     
-    // 🛑 CRITICAL FIX: I removed "map.controls.push".
-    // This allows the HTML/CSS to handle the position (Top-Center),
-    // so it doesn't block the Satellite button.
+    // ✅ Search bar goes to Left (Cleanly inside the map)
+    map.controls[google.maps.ControlPosition.TOP_LEFT].push(searchBar);
 
     // 5. SEARCH LISTENER (THE JUMP FIX)
     searchBar.addEventListener('gmp-placeselect', async ({ detail }) => {
@@ -42,10 +47,13 @@ window.initPickerMap = async function() {
       
       if (!place) return;
 
-      // Force fetch logic to ensure we get coordinates
+      // Force fetch the 'location' field
       await place.fetchFields({ 
         fields: ['location', 'viewport', 'formattedAddress'] 
       });
+
+      // Verification Log
+      console.log("📍 Jump to:", place.location);
 
       // A. JUMP TO LOCATION
       if (place.viewport) {
@@ -58,7 +66,6 @@ window.initPickerMap = async function() {
       // B. MOVE MARKER
       if (place.location) {
           marker.position = place.location;
-          // Send data to app
           sendToFlutter(place.location.lat, place.location.lng);
       }
     });
@@ -74,7 +81,7 @@ window.initPickerMap = async function() {
       updateFromMarker();
     });
 
-    console.log("✅ Map Initialized Correctly");
+    console.log("✅ Map Initialized");
 
   } catch (e) {
     console.error("❌ Map Error:", e);
@@ -84,13 +91,11 @@ window.initPickerMap = async function() {
 // Helper: Handle updates
 function updateFromMarker() {
   const pos = marker.position;
-  // Handle different data types safely
   const lat = (typeof pos.lat === 'function') ? pos.lat() : pos.lat;
   const lng = (typeof pos.lng === 'function') ? pos.lng() : pos.lng;
   
   sendToFlutter(lat, lng);
   
-  // Update address text
   if (geocoder) {
       geocoder.geocode({ location: {lat, lng} }, (results, status) => {
         if (status === "OK" && results[0]) {
@@ -110,7 +115,7 @@ function sendToFlutter(lat, lng) {
   }
 }
 
-// Initial Position Handler (from App)
+// Initial Position Handler
 window.addEventListener("message", (event) => {
   if (event.data.action === "setInitialPos") {
     const lat = parseFloat(event.data.lat);
