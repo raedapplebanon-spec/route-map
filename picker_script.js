@@ -1,5 +1,5 @@
 // --- Globals ---
-let map, marker, geocoder, autocomplete;
+let map, marker, geocoder;
 
 window.initPickerMap = async function() {
   try {
@@ -29,48 +29,41 @@ window.initPickerMap = async function() {
       title: "Move to select location"
     });
 
-    // 4. SETUP SEARCH (The Standard Way)
-    const input = document.getElementById("pac-input");
+    // 4. SETUP SEARCH (The Modern "Element" Way)
+    // We select the element directly from HTML
+    const autocompleteComponent = document.getElementById("pac-input");
     
-    // Create the Autocomplete object
-    autocomplete = new google.maps.places.Autocomplete(input);
-    autocomplete.bindTo("bounds", map);
-
-    // Push to top-left controls
-    map.controls[google.maps.ControlPosition.TOP_LEFT].push(input);
+    // Add the search box to the map UI
+    map.controls[google.maps.ControlPosition.TOP_LEFT].push(autocompleteComponent);
 
     // 5. LISTENERS
 
-    // A. Search Box Listener (Standard 'place_changed' event)
-    autocomplete.addListener("place_changed", () => {
-      const place = autocomplete.getPlace();
+    // A. Search Box Listener (Event is 'gmp-placeselect')
+    autocompleteComponent.addEventListener('gmp-placeselect', async ({ detail }) => {
+      const place = detail.place;
+      
+      // The new API requires us to strictly ask for the fields we need
+      await place.fetchFields({ fields: ['location', 'formattedAddress', 'viewport'] });
 
-      if (!place.geometry || !place.geometry.location) {
-        // User entered the name of a Place that was not suggested
-        window.alert("No details available for input: '" + place.name + "'");
-        return;
-      }
+      // If no location, stop
+      if (!place.location) return;
 
-      // If the place has a geometry, then present it on a map.
-      if (place.geometry.viewport) {
-        map.fitBounds(place.geometry.viewport);
+      // Handle Viewport (Zoom to fit) or Center
+      if (place.viewport) {
+        map.fitBounds(place.viewport);
       } else {
-        map.setCenter(place.geometry.location);
+        map.setCenter(place.location);
         map.setZoom(17);
       }
 
-      marker.position = place.geometry.location;
-      
-      // Send data to Flutter
-      sendToFlutter(place.geometry.location.lat(), place.geometry.location.lng());
+      marker.position = place.location;
+      sendToFlutter(place.location.lat, place.location.lng);
     });
 
     // B. Marker Drag Listener
     marker.addListener("dragend", () => {
       const pos = marker.position;
-      // Note: AdvancedMarker returns lat/lng as plain numbers or null, check access
-      // If using AdvancedMarkerElement, position is often LatLng object, or {lat, lng} interface
-      // Safest way to read:
+      // Handle LatLng object or simple object
       const lat = (typeof pos.lat === 'function') ? pos.lat() : pos.lat;
       const lng = (typeof pos.lng === 'function') ? pos.lng() : pos.lng;
       
@@ -94,29 +87,19 @@ window.initPickerMap = async function() {
 };
 
 // --- EDIT HANDLER ---
-// --- EDIT HANDLER ---
 window.addEventListener("message", (event) => {
   if (event.data.action === "setInitialPos") {
     const lat = parseFloat(event.data.lat);
     const lng = parseFloat(event.data.lng);
     
-    // Ensure lat/lng are valid numbers
     if (!isNaN(lat) && !isNaN(lng) && lat !== 0) {
-      const pos = { lat: lat, lng: lng };
-      
+      const pos = { lat, lng };
       const checkMapInterval = setInterval(() => {
-         // Check if map, marker, AND the internal position property exist
          if (map && marker) {
              clearInterval(checkMapInterval);
-             
-             // 1. Move Map
              map.setCenter(pos);
-             map.setZoom(17);
-             
-             // 2. Move Marker (AdvancedMarkerElement handles simple {lat, lng} objects fine)
              marker.position = pos;
-             
-             // 3. Update Text
+             map.setZoom(17);
              reverseGeocode(pos);
          }
       }, 100);
@@ -129,9 +112,10 @@ function reverseGeocode(latLng) {
   if (!geocoder) return;
   geocoder.geocode({ location: latLng }, (results, status) => {
     if (status === "OK" && results[0]) {
-       const input = document.getElementById("pac-input");
-       if (input) {
-           input.value = results[0].formatted_address;
+       const component = document.getElementById("pac-input");
+       if (component) {
+           // For the web component, we update the 'value' property directly
+           component.value = results[0].formatted_address;
        }
     }
   });
@@ -143,12 +127,11 @@ function sendToFlutter(lat, lng) {
   if (window.FlutterChan) {
     window.FlutterChan.postMessage(JSON.stringify(data));
   } else {
-    // Fallback for iframe/web
     window.parent.postMessage(data, "*");
   }
 }
 
 // Safety Trigger
 if (typeof google !== 'undefined' && google.maps) {
-   // window.initPickerMap(); // Usually callback handles this, but keep if needed
+   // window.initPickerMap(); 
 }
