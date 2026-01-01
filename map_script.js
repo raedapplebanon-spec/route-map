@@ -6,7 +6,7 @@ let directionsRenderer;
 let mapReady = false;
 let pendingData = null;
 let isFirstLoad = true;
-let infoWindow; // Global infoWindow to reuse
+let infoWindow; 
 
 const MY_MAP_ID = "48c2bb983bd19c1c44d95cb7";
 
@@ -29,6 +29,10 @@ function groupCloseLocations(stops, tolerance = 15) {
         c.items.push(stop);
         if (stop.isStart === true) c.isStart = true;
         if (stop.isFinal === true) c.isFinal = true;
+        // Logic for Assistant positioning
+        if (stop.stopType === 'assistant') c.stopType = 'assistant';
+        if (stop.timeShift) c.timeShift = stop.timeShift;
+        
         c.hideMarker = c.hideMarker && (stop.hideMarker === true || stop.hideMarker === 'true');
         placed = true;
         break;
@@ -41,6 +45,8 @@ function groupCloseLocations(stops, tolerance = 15) {
         items: [stop],
         isStart: stop.isStart === true,
         isFinal: stop.isFinal === true,
+        stopType: stop.stopType,
+        timeShift: stop.timeShift,
         hideMarker: (stop.hideMarker === true || stop.hideMarker === 'true')
       });
     }
@@ -53,18 +59,16 @@ function updateRouteSummary(km, minutes) {
   const summaryText = document.getElementById("summary-text");
   if (summaryBox && summaryText) {
     summaryBox.classList.remove("hidden");
-    summaryText.innerHTML = المسافة: <b>${km} كم</b><br>الوقت: <b>${minutes} دقيقة</b>;
+    summaryText.innerHTML = `المسافة: <b>${km} كم</b><br>الوقت: <b>${minutes} دقيقة</b>`;
   }
 }
 
 async function initMap() {
   const { Map } = await google.maps.importLibrary("maps");
   const { AdvancedMarkerElement, PinElement } = await google.maps.importLibrary("marker");
-  const { SearchBox } = await google.maps.importLibrary("places");
+  const { PlaceAutocompleteElement } = await google.maps.importLibrary("places");
 
-  // Fix: Access ControlPosition from the main google.maps object
   const ControlPosition = google.maps.ControlPosition;
-
   infoWindow = new google.maps.InfoWindow();
 
   map = new Map(document.getElementById("map"), {
@@ -75,21 +79,16 @@ async function initMap() {
     streetViewControl: true,
   });
 
-  // --- Search Logic ---
-  const input = document.getElementById("pac-input");
-  const searchBox = new SearchBox(input);
-
-  // Use a safety check to prevent the crash
+  // --- 2025 Search Logic (PlaceAutocompleteElement) ---
+  const autocompleteWidget = document.getElementById("pac-input");
   if (ControlPosition && ControlPosition.TOP_LEFT) {
-    map.controls[ControlPosition.TOP_LEFT].push(input);
-  } else {
-    console.error("Could not find ControlPosition. Check your API version.");
+    map.controls[ControlPosition.TOP_LEFT].push(autocompleteWidget);
   }
 
-  searchBox.addListener("places_changed", () => {
-    const query = input.value.trim().toLowerCase();
-    if (!query) return;
-
+  autocompleteWidget.addEventListener('gmp-placeselect', async (e) => {
+    const place = e.detail.place;
+    const query = (place.displayName || "").toLowerCase();
+    
     const allMarkers = [...routeMarkers, ...availableMarkers];
     const found = allMarkers.find(m => 
       m.names.some(name => name.toLowerCase().includes(query))
@@ -101,19 +100,16 @@ async function initMap() {
       infoWindow.setContent(found.html);
       infoWindow.open(map, found.marker);
     } else {
-      const places = searchBox.getPlaces();
-      if (!places || places.length === 0) return;
-      const bounds = new google.maps.LatLngBounds();
-      places.forEach(place => {
-        if (!place.geometry || !place.geometry.location) return;
-        if (place.geometry.viewport) bounds.union(place.geometry.viewport);
-        else bounds.extend(place.geometry.location);
-      });
-      map.fitBounds(bounds);
+      if (!place.geometry) {
+        await place.fetchFields({ fields: ['geometry', 'location', 'viewport'] });
+      }
+      if (place.geometry) {
+        if (place.geometry.viewport) map.fitBounds(place.geometry.viewport);
+        else map.setCenter(place.geometry.location);
+      }
     }
   });
 
-  // This part will now run because the crash above is fixed!
   directionsService = new google.maps.DirectionsService();
   directionsRenderer = new google.maps.DirectionsRenderer({
     map: map,
@@ -128,6 +124,7 @@ async function initMap() {
     pendingData = null;
   }
 }
+
 function setRouteData(routeArray, availableArray) {
   if (!mapReady) {
     pendingData = { route: routeArray, available: availableArray };
@@ -162,7 +159,6 @@ function setRouteData(routeArray, availableArray) {
       infoWindow.open(map, marker);
     });
 
-    // Store names and html for the search feature
     return { marker, pin, names: studentNames, html: html, lat: pos.lat, lng: pos.lng };
   };
 
@@ -174,14 +170,22 @@ function setRouteData(routeArray, availableArray) {
     const pos = { lat: cluster.lat, lng: cluster.lng };
     bounds.extend(pos);
 
-    let color = cluster.isStart ? "#00c853" : (cluster.isFinal ? "#d50000" : "#1a73e8");
-    let initialText = cluster.isStart ? "S" : (cluster.isFinal ? "E" : "...");
+    // Color Logic: Assistant is always Green (Start) or Red (End) based on your logic
+    let color = "#1a73e8"; // Default student blue
+    if (cluster.isStart || (cluster.stopType === 'assistant' && cluster.timeShift === 'AM')) color = "#00c853";
+    if (cluster.isFinal || (cluster.stopType === 'assistant' && cluster.timeShift === 'PM')) color = "#d50000";
+
+    let initialText = "...";
+    if (cluster.stopType === 'assistant') initialText = cluster.timeShift === 'AM' ? "A" : "P";
+    else if (cluster.isStart) initialText = "S";
+    else if (cluster.isFinal) initialText = "E";
+
     let namesArr = cluster.items.map(x => x.studentName || x.label || "طالب");
 
-    let html = <div style="color:black;text-align:right;direction:rtl;min-width:150px;">;
-    html += <b style="color:${color};">${cluster.isStart ? "نقطة البداية" : (cluster.isFinal ? "نقطة النهاية" : "محطة توقف")}</b><hr style="margin:5px 0;">;
-    namesArr.forEach(name => { html += <div style="margin-bottom:4px;">• <b>${name}</b></div>; });
-    html += </div>;
+    let html = `<div style="color:black;text-align:right;direction:rtl;min-width:150px;">`;
+    html += `<b style="color:${color};">${cluster.stopType === 'assistant' ? "المساعد" : "محطة توقف"}</b><hr style="margin:5px 0;">`;
+    namesArr.forEach(name => { html += `<div style="margin-bottom:4px;">• <b>${name}</b></div>`; });
+    html += `</div>`;
 
     const markerObj = addMarker(pos, "route", html, color, initialText, namesArr);
     routeMarkers.push(markerObj);
@@ -193,12 +197,12 @@ function setRouteData(routeArray, availableArray) {
     bounds.extend(pos);
     let namesArr = cluster.items.map(x => x.studentName);
 
-    let html = <div style="color:black;text-align:right;direction:rtl;min-width:150px;">;
-    html += <b style="color:#ff9100;">خارج الجولة (${cluster.items.length})</b><hr style="margin:5px 0;">;
+    let html = `<div style="color:black;text-align:right;direction:rtl;min-width:150px;">`;
+    html += `<b style="color:#ff9100;">خارج الجولة (${cluster.items.length})</b><hr style="margin:5px 0;">`;
     cluster.items.forEach(x => {
-      html += <div style="margin-bottom:8px;">👨‍🎓 <b>${x.studentName}</b><br><small>${x.gradeName}</small></div>;
+      html += `<div style="margin-bottom:8px;">👨‍🎓 <b>${x.studentName}</b><br><small>${x.gradeName}</small></div>`;
     });
-    html += </div>;
+    html += `</div>`;
 
     const mObj = addMarker(pos, "available", html, "#ff9100", cluster.items.length.toString(), namesArr);
     availableMarkers.push(mObj);
@@ -213,22 +217,28 @@ function setRouteData(routeArray, availableArray) {
 }
 
 function calculateRoadRoute(clusters) {
-  const startStop = clusters.find(c => c.isStart);
-  const endStop = clusters.find(c => c.isFinal);
+  // FIND THE START: Start Point or Assistant AM
+  const startStop = clusters.find(c => (c.stopType === 'assistant' && c.timeShift === 'AM') || c.isStart);
+  
+  // FIND THE END: End Point or Assistant PM
+  const endStop = clusters.find(c => (c.stopType === 'assistant' && c.timeShift === 'PM') || c.isFinal);
+  
   if (!startStop || !endStop) return;
 
-  const waypointClusters = clusters.filter(c => !c.isStart && !c.isFinal);
+  // Waypoints are everything EXCEPT the specific start and end
+  const waypointClusters = clusters.filter(c => c !== startStop && c !== endStop);
 
   directionsService.route({
     origin: { lat: startStop.lat, lng: startStop.lng },
     destination: { lat: endStop.lat, lng: endStop.lng },
     waypoints: waypointClusters.map(c => ({ location: { lat: c.lat, lng: c.lng }, stopover: true })),
     travelMode: google.maps.TravelMode.DRIVING,
-    optimizeWaypoints: true,
+    optimizeWaypoints: true, // Google optimizes the students in the middle
   }, (result, status) => {
     if (status === "OK") {
       directionsRenderer.setDirections(result);
       const optimizedOrder = result.routes[0].waypoint_order; 
+      
       optimizedOrder.forEach((originalIndex, stepIndex) => {
         const clusterData = waypointClusters[originalIndex];
         const stopNum = (stepIndex + 1).toString();
@@ -238,6 +248,7 @@ function calculateRoadRoute(clusters) {
         );
         if (markerObj) markerObj.pin.glyphText = stopNum;
       });
+
       const route = result.routes[0];
       let dist = 0, dur = 0;
       route.legs.forEach(leg => { dist += leg.distance.value; dur += leg.duration.value; });
