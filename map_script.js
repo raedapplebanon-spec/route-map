@@ -17,24 +17,38 @@ function haversineDistance(lat1, lng1, lat2, lng2) {
     return 2 * R * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
-// 2. HELPER: Group nearby stops
+// 2. HELPER: Group nearby stops (UPDATED FOR ROBUST ASSISTANT DETECTION)
 function groupCloseLocations(stops, tolerance = 15) {
     const clusters = [];
     stops.forEach(stop => {
         let placed = false;
+        
+        // Normalize input data to ensure matching works
+        const type = (stop.stopType || "").toLowerCase().trim();
+        const shift = (stop.timeShift || "").toUpperCase().trim();
+
         for (const c of clusters) {
             const d = haversineDistance(c.lat, c.lng, parseFloat(stop.lat), parseFloat(stop.lng));
             if (d < tolerance) {
                 c.items.push(stop);
+                
+                // FORCE UPDATE: If this new stop is Start/End/Assistant, upgrade the cluster
                 if (stop.isStart === true) c.isStart = true;
                 if (stop.isFinal === true) c.isFinal = true;
-                if (stop.stopType === 'assistant') c.stopType = 'assistant';
-                if (stop.timeShift) c.timeShift = stop.timeShift;
+                
+                // If ANYONE in this group is an assistant, the whole group is an assistant stop
+                if (type === 'assistant') {
+                    c.stopType = 'assistant';
+                    // Capture the shift (AM/PM) from the assistant
+                    if (shift) c.timeShift = shift;
+                }
+                
                 c.hideMarker = c.hideMarker && (stop.hideMarker === true || stop.hideMarker === 'true');
                 placed = true;
                 break;
             }
         }
+        
         if (!placed) {
             clusters.push({
                 lat: parseFloat(stop.lat),
@@ -42,8 +56,8 @@ function groupCloseLocations(stops, tolerance = 15) {
                 items: [stop],
                 isStart: stop.isStart === true,
                 isFinal: stop.isFinal === true,
-                stopType: stop.stopType,
-                timeShift: stop.timeShift,
+                stopType: type, // Store normalized type
+                timeShift: shift, // Store normalized shift
                 hideMarker: (stop.hideMarker === true || stop.hideMarker === 'true')
             });
         }
@@ -51,13 +65,12 @@ function groupCloseLocations(stops, tolerance = 15) {
     return clusters;
 }
 
-// 3. UI: Update Summary Box (FIXED: Using simple concatenation to avoid syntax errors)
+// 3. UI: Update Summary
 function updateRouteSummary(km, minutes) {
     const summaryBox = document.getElementById("route-summary");
     const summaryText = document.getElementById("summary-text");
     if (summaryBox && summaryText) {
         summaryBox.classList.remove("hidden");
-        // Using simple quotes to avoid the "Unexpected token" error
         summaryText.innerHTML = "المسافة: <b>" + km + " كم</b><br>الوقت: <b>" + minutes + " دقيقة</b>";
     }
 }
@@ -120,7 +133,7 @@ window.initMap = async function() {
     }
 };
 
-// 5. DATA HANDLER: Receive Data from Flutter
+// 5. DATA HANDLER
 window.setRouteData = function(routeArray, availableArray) {
     if (!mapReady) {
         window.pendingData = { route: routeArray, available: availableArray };
@@ -157,6 +170,7 @@ window.setRouteData = function(routeArray, availableArray) {
         return { marker, pin, names: studentNames, html: html, lat: pos.lat, lng: pos.lng };
     };
 
+    // Use the Updated Grouping Logic
     const routeClusters = groupCloseLocations(routeArray);
     const availableClusters = groupCloseLocations(availableArray);
 
@@ -168,17 +182,18 @@ window.setRouteData = function(routeArray, availableArray) {
         let color = "#1a73e8"; 
         let initialText = "...";
 
+        // Logic to determine color/label
         if (cluster.isStart) {
             color = "#00c853"; initialText = "S";
         } else if (cluster.isFinal) {
             color = "#d50000"; initialText = "E";
         } else if (cluster.stopType === 'assistant') {
+            // Force Assistant Color even if a student is in the group
             color = cluster.timeShift === 'AM' ? "#00c853" : "#d50000"; 
             initialText = cluster.timeShift === 'AM' ? "A" : "P";
         }
 
         let namesArr = cluster.items.map(x => x.studentName || "طالب");
-        // Using simple string concatenation for HTML
         let html = '<div style="color:black;text-align:right;direction:rtl;min-width:150px;">' +
                    '<b style="color:' + color + '">' + (cluster.stopType === 'assistant' ? "المساعد" : "نقطة توقف") + '</b><hr>' +
                    namesArr.map(function(n) { return '<div>• <b>' + n + '</b></div>'; }).join('') +
@@ -205,27 +220,37 @@ window.setRouteData = function(routeArray, availableArray) {
     }
 };
 
-// 6. ROUTE CALCULATION
+// 6. ROUTE CALCULATION (With Logic for Assistant Sandwich)
 function calculateRoadRoute(clusters) {
     const startPoint = clusters.find(c => c.isStart);
     const endPoint = clusters.find(c => c.isFinal);
     if (!startPoint || !endPoint) return;
 
+    // Identify Assistants
     const assistantAM = clusters.find(c => c.stopType === 'assistant' && c.timeShift === 'AM');
     const assistantPM = clusters.find(c => c.stopType === 'assistant' && c.timeShift === 'PM');
 
+    // Create a list of students that EXCLUDES the Start, End, and Assistants
     const studentStops = clusters.filter(c => 
-        c !== startPoint && c !== endPoint && c !== assistantAM && c !== assistantPM
+        c !== startPoint && 
+        c !== endPoint && 
+        c !== assistantAM && 
+        c !== assistantPM
     );
 
     let finalWaypoints = [];
 
+    // 1. Force Assistant AM to be the first waypoint
     if (assistantAM) {
         finalWaypoints.push({ location: { lat: assistantAM.lat, lng: assistantAM.lng }, stopover: true });
     }
+
+    // 2. Add all students
     studentStops.forEach(s => {
         finalWaypoints.push({ location: { lat: s.lat, lng: s.lng }, stopover: true });
     });
+
+    // 3. Force Assistant PM to be the last waypoint
     if (assistantPM) {
         finalWaypoints.push({ location: { lat: assistantPM.lat, lng: assistantPM.lng }, stopover: true });
     }
@@ -235,6 +260,8 @@ function calculateRoadRoute(clusters) {
         destination: { lat: endPoint.lat, lng: endPoint.lng },
         waypoints: finalWaypoints,
         travelMode: google.maps.TravelMode.DRIVING,
+        // Google optimizes the *middle* content. 
+        // By structuring the array [AsstAM, ...Students, AsstPM], we give Google the strongest hint possible.
         optimizeWaypoints: true, 
     }, (result, status) => {
         if (status === "OK") {
@@ -242,6 +269,7 @@ function calculateRoadRoute(clusters) {
             const route = result.routes[0];
             const order = route.waypoint_order; 
 
+            // Map the optimized order back to our marker numbers
             order.forEach((originalIdx, stepIdx) => {
                 const latLng = finalWaypoints[originalIdx].location;
                 const stopNum = (stepIdx + 1).toString();
