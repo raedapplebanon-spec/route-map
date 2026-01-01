@@ -3,35 +3,32 @@
 <head>
   <meta charset="UTF-8">
   <title>Location Picker</title>
-  
-  <script type="module" src="https://unpkg.com/@googlemaps/extended-component-library@0.6"></script>
-
   <style>
     html, body, #map { height: 100%; margin: 0; padding: 0; }
     
-    /* This CSS created the white box in your screenshot */
     gmpx-place-autocomplete {
       background-color: #fff;
       font-family: 'Segoe UI', Arial, sans-serif;
       margin: 10px;
       width: 300px;
-      height: 45px; 
+      height: 45px;
       border-radius: 8px;
       box-shadow: 0 4px 12px rgba(0,0,0,0.15);
       z-index: 10;
     }
   </style>
 
+  <!-- ADD THIS LINE - Import Extended Components Library -->
+  <script type="module" src="https://unpkg.com/@googlemaps/extended-component-library@0.6"></script>
+  
   <script src="picker_script.js"></script>
 </head>
 <body>
-
   <gmpx-place-autocomplete id="pac-input" placeholder="ابحث عن موقع..."></gmpx-place-autocomplete>
-
   <div id="map"></div>
 
   <script
-    src="https://maps.googleapis.com/maps/api/js?key=YOUR_API_KEY_HERE&libraries=marker,places,geocoding&callback=initPickerMap&loading=async&v=beta"
+    src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCYaJ4Gjq36mq8swYgjNXOYr5mKZi45niA&libraries=marker,places,geocoding&callback=initPickerMap&loading=async&v=beta"
     async defer>
   </script>
 </body>
