@@ -29,40 +29,37 @@ window.initPickerMap = async function() {
       title: "Move to select location"
     });
 
-    // 2. SETUP SEARCH (Using the HTML element)
+    // 2. SETUP SEARCH
+    // Since we switched HTML to v=beta, we can just grab the element directly!
     const autocompleteWidget = document.getElementById("pac-input");
     
-    // Check if the element was actually found to prevent errors
-    if (autocompleteWidget) {
-        // Add to Map UI (Top Left)
-        map.controls[google.maps.ControlPosition.TOP_LEFT].push(autocompleteWidget);
+    // Add to Map UI (Top Left)
+    map.controls[google.maps.ControlPosition.TOP_LEFT].push(autocompleteWidget);
 
-        // 3. LISTENERS
+    // 3. LISTENERS
+
+    // A. Search Box Listener
+    autocompleteWidget.addEventListener('gmp-placeselect', async (e) => {
+      const place = e.detail.place;
+      
+      // Ensure geometry is fetched
+      if (!place.geometry) {
+        await place.fetchFields({ fields: ['geometry', 'location', 'formatted_address'] });
+      }
+
+      if (place.geometry && place.geometry.location) {
+        const pos = place.geometry.location;
+        map.setCenter(pos);
+        marker.position = pos;
+        map.setZoom(17);
+        sendToFlutter(pos.lat(), pos.lng());
         
-        // A. Search Box Listener
-        autocompleteWidget.addEventListener('gmp-placeselect', async (e) => {
-          const place = e.detail.place;
-          
-          if (!place.geometry) {
-            await place.fetchFields({ fields: ['geometry', 'location', 'formatted_address'] });
-          }
-
-          if (place.geometry && place.geometry.location) {
-            const pos = place.geometry.location;
-            map.setCenter(pos);
-            marker.position = pos;
-            map.setZoom(17);
-            sendToFlutter(pos.lat(), pos.lng());
-            
-            // Update text in box
-            if (place.formatted_address) {
-                autocompleteWidget.value = place.formatted_address;
-            }
-          }
-        });
-    } else {
-        console.error("❌ Could not find element with id 'pac-input'");
-    }
+        // Update visual text
+        if (place.formatted_address) {
+            autocompleteWidget.value = place.formatted_address;
+        }
+      }
+    });
 
     // B. Marker Drag Listener
     marker.addListener("dragend", () => {
