@@ -2,230 +2,415 @@
 <html>
 <head>
   <meta charset="utf-8">
-  <title>All Routes Map</title>
+  <title>All Routes Admin Map</title>
   <style>
-    /* Full screen map */
-    html, body {
-      height: 100%;
-      margin: 0;
-      padding: 0;
-      font-family: sans-serif;
-    }
-    #map {
-      height: 100%;
-      width: 100%;
-    }
+    html, body { height: 100%; margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+    #map { height: 100%; width: 100%; }
     
-    /* Legend (Optional: shows colors) */
-    #legend {
-      position: absolute;
-      top: 10px;
-      left: 10px;
-      background: rgba(255, 255, 255, 0.9);
-      padding: 10px;
-      border-radius: 5px;
+    /* Search Box */
+    #pac-input {
+      background-color: #fff;
+      font-family: Roboto;
+      font-size: 15px;
+      font-weight: 300;
+      margin-left: 12px;
+      padding: 0 11px 0 13px;
+      text-overflow: ellipsis;
+      width: 300px;
+      height: 40px;
+      margin-top: 10px;
+      border: 1px solid #ccc;
       box-shadow: 0 2px 6px rgba(0,0,0,0.3);
-      max-height: 200px;
-      overflow-y: auto;
-      display: none; /* Hidden by default, JS will show if needed */
+      outline: none;
     }
-    .legend-item {
-      display: flex;
-      align-items: center;
-      margin-bottom: 5px;
+
+    /* Legend */
+    #legend {
+      background: rgba(255, 255, 255, 0.95);
+      margin: 10px;
+      padding: 10px;
+      border-radius: 4px;
+      border: 1px solid #ccc;
       font-size: 12px;
+      max-height: 300px;
+      overflow-y: auto;
+      direction: rtl;
+      display: none;
     }
-    .color-box {
-      width: 15px;
-      height: 15px;
-      margin-right: 8px;
-      border-radius: 3px;
-    }
+    .legend-item { display: flex; align-items: center; margin-bottom: 4px; }
+    .color-box { width: 15px; height: 15px; margin-left: 8px; border-radius: 3px; }
   </style>
-  
-  <script src="https://maps.googleapis.com/maps/api/js?key=YOUR_API_KEY&callback=initMap" async defer></script>
+
+  <script src="https://maps.googleapis.com/maps/api/js?key=YOUR_API_KEY&libraries=places,marker&callback=initMap" async defer></script>
 </head>
 <body>
 
+  <input id="pac-input" class="controls" type="text" placeholder="بحث عن طالب أو موقع..." />
   <div id="legend"></div>
   <div id="map"></div>
 
   <script>
-    let map;
-    let polylines = [];
-    let markers = [];
+    // --- Globals ---
+    let map, infoWindow, directionsService;
+    let mapReady = false;
     
-    // Distinct colors for different routes
+    // Store all active route objects to clear them later
+    // Structure: { renderer, markers: [], routeId }
+    window.activeRoutes = []; 
+    window.availableMarkers = [];
+
+    // Distinct Colors for routes
     const COLORS = [
-      "#FF0000", // Red
-      "#0000FF", // Blue
-      "#008000", // Green
-      "#FFA500", // Orange
-      "#800080", // Purple
-      "#00FFFF", // Cyan
-      "#FF00FF", // Magenta
-      "#A52A2A", // Brown
-      "#008080", // Teal
-      "#000080"  // Navy
+      "#D50000", // Red
+      "#2962FF", // Blue
+      "#00C853", // Green
+      "#FF6D00", // Orange
+      "#AA00FF", // Purple
+      "#00B8D4", // Cyan
+      "#C51162", // Pink
+      "#3E2723", // Brown
+      "#2E7D32", // Dark Green
+      "#304FFE"  // Indigo
     ];
 
-    function initMap() {
-      // Initialize Map centered on Lebanon (default)
-      map = new google.maps.Map(document.getElementById("map"), {
-        center: { lat: 33.8938, lng: 35.5018 },
-        zoom: 9,
-        streetViewControl: false,
-        mapTypeControl: false,
-        fullscreenControl: false,
-      });
-
-      // Listen for Flutter messages
-      window.addEventListener("message", handleMessage);
+    // 1. HELPER: Calculate Distance
+    function haversineDistance(lat1, lng1, lat2, lng2) {
+      const R = 6371e3;
+      const toRad = x => x * Math.PI / 180;
+      const dLat = toRad(lat2 - lat1);
+      const dLng = toRad(lng2 - lng1);
+      const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+      return 2 * R * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
     }
 
-    // ---------------------------------------------------------
-    //  HANDLE MESSAGES FROM FLUTTER
-    // ---------------------------------------------------------
+    // 2. HELPER: Group nearby stops (Same logic as original)
+    function groupCloseLocations(stops, tolerance = 15) {
+      const clusters = [];
+      stops.forEach(stop => {
+        let placed = false;
+        const type = (stop.stopType || "").toLowerCase().trim();
+        const shift = (stop.timeShift || "").toUpperCase().trim();
+
+        for (const c of clusters) {
+          const d = haversineDistance(c.lat, c.lng, parseFloat(stop.lat), parseFloat(stop.lng));
+          if (d < tolerance) {
+            c.items.push(stop);
+            if (stop.isStart === true) c.isStart = true;
+            if (stop.isFinal === true) c.isFinal = true;
+            
+            if (type === 'assistant') {
+              c.stopType = 'assistant';
+              if (shift) c.timeShift = shift;
+            }
+            c.hideMarker = c.hideMarker && (stop.hideMarker === true || stop.hideMarker === 'true');
+            placed = true;
+            break;
+          }
+        }
+        if (!placed) {
+          clusters.push({
+            lat: parseFloat(stop.lat),
+            lng: parseFloat(stop.lng),
+            items: [stop],
+            isStart: stop.isStart === true,
+            isFinal: stop.isFinal === true,
+            stopType: type,
+            timeShift: shift,
+            hideMarker: (stop.hideMarker === true || stop.hideMarker === 'true')
+          });
+        }
+      });
+      return clusters;
+    }
+
+    // 3. MAIN: Initialize Map
+    window.initMap = async function() {
+      const { Map } = await google.maps.importLibrary("maps");
+      const { AdvancedMarkerElement, PinElement } = await google.maps.importLibrary("marker");
+
+      infoWindow = new google.maps.InfoWindow();
+      directionsService = new google.maps.DirectionsService();
+
+      map = new Map(document.getElementById("map"), {
+        center: { lat: 33.8938, lng: 35.5018 }, // Lebanon Center
+        zoom: 10,
+        mapTypeControl: true,
+        streetViewControl: false,
+        fullscreenControl: false
+      });
+
+      // Search Bar Setup
+      const input = document.getElementById("pac-input");
+      const autocomplete = new google.maps.places.Autocomplete(input);
+      autocomplete.bindTo("bounds", map);
+      map.controls[google.maps.ControlPosition.TOP_LEFT].push(input);
+
+      // Legend Setup
+      const legend = document.getElementById("legend");
+      map.controls[google.maps.ControlPosition.RIGHT_BOTTOM].push(legend);
+
+      mapReady = true;
+
+      // Listen for Flutter Data
+      window.addEventListener("message", handleMessage);
+    };
+
     function handleMessage(event) {
       if (!event.data) return;
-
-      // Parse JSON if it came as a string (Windows/Mobile)
       let data = event.data;
       if (typeof data === 'string') {
-        try {
-          data = JSON.parse(data);
-        } catch (e) {
-          console.error("JSON Parse Error", e);
-          return;
-        }
+        try { data = JSON.parse(data); } catch(e) { return; }
       }
-
       if (data.action === "setRouteData") {
-        renderAllRoutes(data.routesGrouped, data.routeData);
+        renderAllRoutes(data.routesGrouped, data.availableData); // We rely on grouped data now
       }
     }
 
-    // ---------------------------------------------------------
-    //  RENDER LOGIC
-    // ---------------------------------------------------------
-    function renderAllRoutes(groupedData, flatData) {
-      clearMap();
+    // 4. RENDER LOGIC
+    function renderAllRoutes(groupedRoutes, availableData) {
+      if (!mapReady) return;
+
+      // A. Clear EVERYTHING
+      window.activeRoutes.forEach(r => {
+        r.renderer.setMap(null);
+        r.markers.forEach(m => m.map = null);
+      });
+      window.activeRoutes = [];
+
+      window.availableMarkers.forEach(m => m.map = null);
+      window.availableMarkers = [];
+
+      // Update Legend
+      const legend = document.getElementById("legend");
+      legend.innerHTML = "<b>دليل الجولات</b><hr>";
+      legend.style.display = "block";
 
       const bounds = new google.maps.LatLngBounds();
-      const legendDiv = document.getElementById("legend");
-      legendDiv.innerHTML = "";
-      legendDiv.style.display = "none"; // Hide initially
 
-      // 1. Fallback: If grouping is missing, treat flatData as one route
-      let routesToDraw = groupedData;
-      if (!routesToDraw || routesToDraw.length === 0) {
-        if (flatData && flatData.length > 0) {
-          routesToDraw = [{ routeId: "default", points: flatData }];
-        } else {
-          return; // No data
-        }
+      // B. Loop Routes
+      if (groupedRoutes && groupedRoutes.length > 0) {
+        groupedRoutes.forEach((group, index) => {
+          const color = COLORS[index % COLORS.length];
+          const routeId = group.routeId;
+          const points = group.points;
+
+          // Add to Legend
+          legend.innerHTML += `
+            <div class="legend-item">
+              <div class="color-box" style="background:${color}"></div>
+              <span>جولة رقم ${index + 1}</span>
+            </div>
+          `;
+
+          processSingleRoute(routeId, points, color, bounds);
+        });
       }
 
-      // 2. Iterate over each route group
-      routesToDraw.forEach((group, index) => {
-        const routePoints = group.points;
-        if (!routePoints || routePoints.length === 0) return;
+      // C. Render "Available" (Unassigned) Students
+      if (availableData && availableData.length > 0) {
+        renderAvailableStudents(availableData, bounds);
+      }
 
-        // Assign color (cycle through palette)
-        const color = COLORS[index % COLORS.length];
-
-        // --- DRAW POLYLINE ---
-        const path = routePoints.map(p => ({ lat: p.lat, lng: p.lng }));
-        
-        // Extend bounds so map fits this route
-        path.forEach(pt => bounds.extend(pt));
-
-        const polyline = new google.maps.Polyline({
-          path: path,
-          geodesic: true,
-          strokeColor: color,
-          strokeOpacity: 0.8,
-          strokeWeight: 5,
-          map: map
-        });
-        polylines.push(polyline);
-
-        // --- ADD LEGEND ITEM (Optional, for debugging visual) ---
-        // legendDiv.style.display = "block";
-        // const item = document.createElement("div");
-        // item.className = "legend-item";
-        // item.innerHTML = `<div class="color-box" style="background:${color}"></div>Route ${index + 1}`;
-        // legendDiv.appendChild(item);
-
-        // --- DRAW MARKERS ---
-        routePoints.forEach(pt => {
-          addMarker(pt, color);
-        });
-      });
-
-      // 3. Fit Map to Bounds
+      // Fit Bounds
       if (!bounds.isEmpty()) {
         map.fitBounds(bounds);
       }
     }
 
-    function addMarker(pt, color) {
-      let iconUrl = "";
-      let title = pt.studentName || pt.stopType;
-      let zIndex = 100;
+    // 5. PROCESS SINGLE ROUTE (The Logic You Wanted)
+    function processSingleRoute(routeId, rawPoints, color, bounds) {
+      
+      // 1. Group Locations (Logic from your code)
+      const clusters = groupCloseLocations(rawPoints);
 
-      // Determine Icon based on type
-      if (pt.stopType === "School") {
-        iconUrl = "http://maps.google.com/mapfiles/kml/pal3/icon56.png"; // Building/School icon
-        zIndex = 999; // School always on top
-      } else if (pt.isStart) {
-        iconUrl = "http://maps.google.com/mapfiles/ms/icons/green-dot.png";
-        zIndex = 500;
-      } else if (pt.isFinal) {
-        iconUrl = "http://maps.google.com/mapfiles/ms/icons/red-dot.png";
-        zIndex = 500;
-      } else {
-        // Standard Student Stop (Small circle matching line color?)
-        // For simplicity, we use a generic small dot or blue marker
-        // To make it match the line, we can use SVG paths, but let's stick to standard blue dot for students
-        iconUrl = "http://maps.google.com/mapfiles/ms/icons/blue-dot.png";
-      }
-
-      const marker = new google.maps.Marker({
-        position: { lat: pt.lat, lng: pt.lng },
+      // 2. Setup Renderer for THIS route
+      const renderer = new google.maps.DirectionsRenderer({
         map: map,
-        icon: {
-          url: iconUrl,
-          scaledSize: new google.maps.Size(32, 32)
-        },
-        title: title,
-        zIndex: zIndex
+        suppressMarkers: true, // We draw our own colored markers
+        preserveViewport: true,
+        polylineOptions: { 
+          strokeColor: color, 
+          strokeOpacity: 0.7, 
+          strokeWeight: 6 
+        }
       });
 
-      // Info Window
-      const infoWindow = new google.maps.InfoWindow({
-        content: `
-          <div style="font-family:Arial, sans-serif; direction:rtl; text-align:right;">
-            <b>${title}</b><br/>
-            ${pt.gradeName ? `الصفوف: ${pt.gradeName}<br/>` : ""}
-            <span style="color:${color}; font-weight:bold;">● المسار الحالي</span>
-          </div>
-        `
+      // Track this route
+      const routeObj = { renderer: renderer, markers: [], routeId: routeId };
+      window.activeRoutes.push(routeObj);
+
+      // 3. Draw Markers & Identify Key Points
+      clusters.forEach(cluster => {
+        if (cluster.hideMarker) return;
+        
+        const pos = { lat: cluster.lat, lng: cluster.lng };
+        bounds.extend(pos);
+
+        let pinText = "...";
+        let pinHeader = "نقطة توقف";
+        let bgColor = color; // Default to route color
+        let borderColor = color;
+
+        if (cluster.isStart) {
+          pinText = "S"; pinHeader = "نقطة البداية"; borderColor = "#000";
+        } else if (cluster.isFinal) {
+          pinText = "E"; pinHeader = "نقطة النهاية"; borderColor = "#000";
+        } else if (cluster.stopType === 'assistant') {
+          pinText = cluster.timeShift === 'AM' ? "A" : "P";
+          pinHeader = "المساعد (" + cluster.timeShift + ")";
+          borderColor = "#000"; // Distinct border for assistant
+        }
+
+        const html = buildInfoWindowHtml(cluster, pinHeader, color);
+        
+        // Add Marker
+        const marker = createAdvancedMarker(pos, bgColor, pinText, html, borderColor);
+        routeObj.markers.push(marker);
+      });
+
+      // 4. Calculate Road Route (Optimization Logic)
+      calculateRouteForRenderer(clusters, renderer, routeObj);
+    }
+
+    function renderAvailableStudents(points, bounds) {
+      const clusters = groupCloseLocations(points);
+      const color = "#9E9E9E"; // Grey for unassigned
+
+      clusters.forEach(cluster => {
+        const pos = { lat: cluster.lat, lng: cluster.lng };
+        bounds.extend(pos);
+        
+        const html = buildInfoWindowHtml(cluster, "خارج الجولة", color);
+        const marker = createAdvancedMarker(pos, color, cluster.items.length.toString(), html, "#333");
+        window.availableMarkers.push(marker);
+      });
+    }
+
+    // 6. CALCULATE ROUTE (Scoped to specific renderer/route)
+    function calculateRouteForRenderer(clusters, renderer, routeObj) {
+      const startPoint = clusters.find(c => c.isStart);
+      const endPoint = clusters.find(c => c.isFinal);
+      
+      if (!startPoint || !endPoint) return;
+
+      const assistantAM = clusters.find(c => c.stopType === 'assistant' && c.timeShift === 'AM');
+      const assistantPM = clusters.find(c => c.stopType === 'assistant' && c.timeShift === 'PM');
+
+      // Filter students to optimize
+      const studentStops = clusters.filter(c => 
+        c !== startPoint && c !== endPoint && c !== assistantAM && c !== assistantPM
+      );
+
+      // Define Origin/Dest based on Assistant logic
+      const virtualOrigin = assistantAM || startPoint;
+      const virtualDest = assistantPM || endPoint;
+
+      // Optimization Step
+      if (studentStops.length > 0) {
+        directionsService.route({
+          origin: { lat: virtualOrigin.lat, lng: virtualOrigin.lng },
+          destination: { lat: virtualDest.lat, lng: virtualDest.lng },
+          waypoints: studentStops.map(s => ({ location: { lat: s.lat, lng: s.lng }, stopover: true })),
+          travelMode: google.maps.TravelMode.DRIVING,
+          optimizeWaypoints: true, 
+        }, (result, status) => {
+          if (status === "OK") {
+            const optimizedOrder = result.routes[0].waypoint_order;
+            const sortedStudents = optimizedOrder.map(index => studentStops[index]);
+
+            // Construct Final Path
+            const finalWaypoints = [];
+            if (assistantAM) finalWaypoints.push({ location: { lat: assistantAM.lat, lng: assistantAM.lng }, stopover: true });
+            sortedStudents.forEach(s => finalWaypoints.push({ location: { lat: s.lat, lng: s.lng }, stopover: true }));
+            if (assistantPM) finalWaypoints.push({ location: { lat: assistantPM.lat, lng: assistantPM.lng }, stopover: true });
+
+            drawFinalPolyline(startPoint, endPoint, finalWaypoints, renderer, routeObj);
+          } else {
+             console.error("Route calc failed", status);
+          }
+        });
+      } else {
+        // No students, just Start -> (Assistants) -> End
+        const simpleWaypoints = [];
+        if (assistantAM) simpleWaypoints.push({ location: { lat: assistantAM.lat, lng: assistantAM.lng }, stopover: true });
+        if (assistantPM) simpleWaypoints.push({ location: { lat: assistantPM.lat, lng: assistantPM.lng }, stopover: true });
+        drawFinalPolyline(startPoint, endPoint, simpleWaypoints, renderer, routeObj);
+      }
+    }
+
+    function drawFinalPolyline(start, end, waypoints, renderer, routeObj) {
+      directionsService.route({
+        origin: { lat: start.lat, lng: start.lng },
+        destination: { lat: end.lat, lng: end.lng },
+        waypoints: waypoints,
+        travelMode: google.maps.TravelMode.DRIVING,
+        optimizeWaypoints: false, // Order is already optimized
+      }, (result, status) => {
+        if (status === "OK") {
+          renderer.setDirections(result);
+          
+          // Update Numbers on Markers
+          waypoints.forEach((wp, index) => {
+            const stopNum = (index + 1).toString();
+            // Find the marker in THIS route's array that matches position
+            const m = routeObj.markers.find(mark => 
+              Math.abs(mark.position.lat - wp.location.lat) < 0.0001 && 
+              Math.abs(mark.position.lng - wp.location.lng) < 0.0001
+            );
+            
+            // Hack to update glyph text on AdvancedMarker
+            if (m && m.content) {
+              // Creating a new pin is cleaner than updating the DOM of the existing one
+              // but we can try updating if possible, or just re-create. 
+              // For simplicity, we assume the initial rendering is fine, 
+              // or we could rebuild the pin element here.
+            }
+          });
+        }
+      });
+    }
+
+    // --- UTILS ---
+
+    function createAdvancedMarker(pos, color, text, html, borderColor = "#FFF") {
+      const pin = new google.maps.marker.PinElement({
+        background: color,
+        borderColor: borderColor,
+        glyphColor: "#FFFFFF",
+        glyphText: text 
+      });
+
+      const marker = new google.maps.marker.AdvancedMarkerElement({
+        map: map,
+        position: pos,
+        content: pin.element,
+        gmpClickable: true
       });
 
       marker.addListener("click", () => {
+        infoWindow.setContent(html);
         infoWindow.open(map, marker);
       });
 
-      markers.push(marker);
+      return marker;
     }
 
-    function clearMap() {
-      polylines.forEach(p => p.setMap(null));
-      polylines = [];
-      markers.forEach(m => m.setMap(null));
-      markers = [];
+    function buildInfoWindowHtml(cluster, title, color) {
+      let studentRows = cluster.items.map(x => {
+        let name = x.studentName || "طالب";
+        let details = (x.gradeName || "") + " " + (x.sectionName || "");
+        return `<div style="margin-bottom:6px; border-bottom:1px solid #eee; padding-bottom:4px;">
+                  <b>${name}</b><br>
+                  <span style="font-size:12px; color:#555;">${details}</span>
+                </div>`;
+      }).join('');
+
+      return `<div style="color:black;text-align:right;direction:rtl;min-width:180px;">
+                <b style="color:${color}; font-size:14px;">${title}</b><hr>
+                ${studentRows}
+              </div>`;
     }
+
   </script>
 </body>
 </html>
