@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>All Routes Map</title>
+  <style>
+    /* Full screen map */
+    html, body {
+      height: 100%;
+      margin: 0;
+      padding: 0;
+      font-family: sans-serif;
+    }
+    #map {
+      height: 100%;
+      width: 100%;
+    }
+    
+    /* Legend (Optional: shows colors) */
+    #legend {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      background: rgba(255, 255, 255, 0.9);
+      padding: 10px;
+      border-radius: 5px;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+      max-height: 200px;
+      overflow-y: auto;
+      display: none; /* Hidden by default, JS will show if needed */
+    }
+    .legend-item {
+      display: flex;
+      align-items: center;
+      margin-bottom: 5px;
+      font-size: 12px;
+    }
+    .color-box {
+      width: 15px;
+      height: 15px;
+      margin-right: 8px;
+      border-radius: 3px;
+    }
+  </style>
+  
+  <script src="https://maps.googleapis.com/maps/api/js?key=YOUR_API_KEY&callback=initMap" async defer></script>
+</head>
+<body>
+
+  <div id="legend"></div>
+  <div id="map"></div>
+
+  <script>
+    let map;
+    let polylines = [];
+    let markers = [];
+    
+    // Distinct colors for different routes
+    const COLORS = [
+      "#FF0000", // Red
+      "#0000FF", // Blue
+      "#008000", // Green
+      "#FFA500", // Orange
+      "#800080", // Purple
+      "#00FFFF", // Cyan
+      "#FF00FF", // Magenta
+      "#A52A2A", // Brown
+      "#008080", // Teal
+      "#000080"  // Navy
+    ];
+
+    function initMap() {
+      // Initialize Map centered on Lebanon (default)
+      map = new google.maps.Map(document.getElementById("map"), {
+        center: { lat: 33.8938, lng: 35.5018 },
+        zoom: 9,
+        streetViewControl: false,
+        mapTypeControl: false,
+        fullscreenControl: false,
+      });
+
+      // Listen for Flutter messages
+      window.addEventListener("message", handleMessage);
+    }
+
+    // ---------------------------------------------------------
+    //  HANDLE MESSAGES FROM FLUTTER
+    // ---------------------------------------------------------
+    function handleMessage(event) {
+      if (!event.data) return;
+
+      // Parse JSON if it came as a string (Windows/Mobile)
+      let data = event.data;
+      if (typeof data === 'string') {
+        try {
+          data = JSON.parse(data);
+        } catch (e) {
+          console.error("JSON Parse Error", e);
+          return;
+        }
+      }
+
+      if (data.action === "setRouteData") {
+        renderAllRoutes(data.routesGrouped, data.routeData);
+      }
+    }
+
+    // ---------------------------------------------------------
+    //  RENDER LOGIC
+    // ---------------------------------------------------------
+    function renderAllRoutes(groupedData, flatData) {
+      clearMap();
+
+      const bounds = new google.maps.LatLngBounds();
+      const legendDiv = document.getElementById("legend");
+      legendDiv.innerHTML = "";
+      legendDiv.style.display = "none"; // Hide initially
+
+      // 1. Fallback: If grouping is missing, treat flatData as one route
+      let routesToDraw = groupedData;
+      if (!routesToDraw || routesToDraw.length === 0) {
+        if (flatData && flatData.length > 0) {
+          routesToDraw = [{ routeId: "default", points: flatData }];
+        } else {
+          return; // No data
+        }
+      }
+
+      // 2. Iterate over each route group
+      routesToDraw.forEach((group, index) => {
+        const routePoints = group.points;
+        if (!routePoints || routePoints.length === 0) return;
+
+        // Assign color (cycle through palette)
+        const color = COLORS[index % COLORS.length];
+
+        // --- DRAW POLYLINE ---
+        const path = routePoints.map(p => ({ lat: p.lat, lng: p.lng }));
+        
+        // Extend bounds so map fits this route
+        path.forEach(pt => bounds.extend(pt));
+
+        const polyline = new google.maps.Polyline({
+          path: path,
+          geodesic: true,
+          strokeColor: color,
+          strokeOpacity: 0.8,
+          strokeWeight: 5,
+          map: map
+        });
+        polylines.push(polyline);
+
+        // --- ADD LEGEND ITEM (Optional, for debugging visual) ---
+        // legendDiv.style.display = "block";
+        // const item = document.createElement("div");
+        // item.className = "legend-item";
+        // item.innerHTML = `<div class="color-box" style="background:${color}"></div>Route ${index + 1}`;
+        // legendDiv.appendChild(item);
+
+        // --- DRAW MARKERS ---
+        routePoints.forEach(pt => {
+          addMarker(pt, color);
+        });
+      });
+
+      // 3. Fit Map to Bounds
+      if (!bounds.isEmpty()) {
+        map.fitBounds(bounds);
+      }
+    }
+
+    function addMarker(pt, color) {
+      let iconUrl = "";
+      let title = pt.studentName || pt.stopType;
+      let zIndex = 100;
+
+      // Determine Icon based on type
+      if (pt.stopType === "School") {
+        iconUrl = "http://maps.google.com/mapfiles/kml/pal3/icon56.png"; // Building/School icon
+        zIndex = 999; // School always on top
+      } else if (pt.isStart) {
+        iconUrl = "http://maps.google.com/mapfiles/ms/icons/green-dot.png";
+        zIndex = 500;
+      } else if (pt.isFinal) {
+        iconUrl = "http://maps.google.com/mapfiles/ms/icons/red-dot.png";
+        zIndex = 500;
+      } else {
+        // Standard Student Stop (Small circle matching line color?)
+        // For simplicity, we use a generic small dot or blue marker
+        // To make it match the line, we can use SVG paths, but let's stick to standard blue dot for students
+        iconUrl = "http://maps.google.com/mapfiles/ms/icons/blue-dot.png";
+      }
+
+      const marker = new google.maps.Marker({
+        position: { lat: pt.lat, lng: pt.lng },
+        map: map,
+        icon: {
+          url: iconUrl,
+          scaledSize: new google.maps.Size(32, 32)
+        },
+        title: title,
+        zIndex: zIndex
+      });
+
+      // Info Window
+      const infoWindow = new google.maps.InfoWindow({
+        content: `
+          <div style="font-family:Arial, sans-serif; direction:rtl; text-align:right;">
+            <b>${title}</b><br/>
+            ${pt.gradeName ? `الصفوف: ${pt.gradeName}<br/>` : ""}
+            <span style="color:${color}; font-weight:bold;">● المسار الحالي</span>
+          </div>
+        `
+      });
+
+      marker.addListener("click", () => {
+        infoWindow.open(map, marker);
+      });
+
+      markers.push(marker);
+    }
+
+    function clearMap() {
+      polylines.forEach(p => p.setMap(null));
+      polylines = [];
+      markers.forEach(m => m.setMap(null));
+      markers = [];
+    }
+  </script>
+</body>
+</html>
