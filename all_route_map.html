@@ -110,6 +110,7 @@
     }
 
     // --- INIT MAP ---
+    // 3. MAIN: Initialize Map
     window.initMap = async function() {
       const { Map } = await google.maps.importLibrary("maps");
       const { AdvancedMarkerElement, PinElement } = await google.maps.importLibrary("marker");
@@ -121,7 +122,9 @@
         zoom: 10,
         mapTypeControl: true,
         streetViewControl: false,
-        fullscreenControl: false
+        fullscreenControl: false,
+        // ✅ THIS FIXES THE ERROR:
+        mapId: "48c2bb983bd19c1c44d95cb7" 
       });
 
       const input = document.getElementById("pac-input");
