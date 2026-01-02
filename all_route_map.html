@@ -41,7 +41,7 @@
     .color-box { width: 15px; height: 15px; margin-left: 8px; border-radius: 3px; border: 1px solid #999; }
   </style>
 
-  <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCYaJ4Gjq36mq8swYgjNXOYr5mKZi45niA&callback=initMap&libraries=marker,places,geometry&loading=async&v=weekly" async defer></script>
+  <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCYaJ4Gjq36mq8swYgjNXOYr5mKZi45niA&libraries=places,marker&callback=initMap&loading=async&v=weekly" async defer></script>
 </head>
 <body>
 
@@ -62,6 +62,7 @@
       "#00B8D4", "#C51162", "#3E2723", "#2E7D32", "#304FFE"
     ];
 
+    // 1. HELPER: Calculate Distance (For Grouping)
     function haversineDistance(lat1, lng1, lat2, lng2) {
       const R = 6371e3;
       const toRad = x => x * Math.PI / 180;
@@ -71,6 +72,7 @@
       return 2 * R * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
     }
 
+    // 2. HELPER: Group nearby stops (15m tolerance)
     function groupCloseLocations(stops, tolerance = 15) {
       const clusters = [];
       stops.forEach(stop => {
@@ -110,7 +112,6 @@
     }
 
     // --- INIT MAP ---
-    // 3. MAIN: Initialize Map
     window.initMap = async function() {
       const { Map } = await google.maps.importLibrary("maps");
       const { AdvancedMarkerElement, PinElement } = await google.maps.importLibrary("marker");
@@ -123,8 +124,7 @@
         mapTypeControl: true,
         streetViewControl: false,
         fullscreenControl: false,
-        // ✅ THIS FIXES THE ERROR:
-        mapId: "48c2bb983bd19c1c44d95cb7" 
+        mapId: "48c2bb983bd19c1c44d95cb7" // ✅ REQUIRED for Advanced Markers
       });
 
       const input = document.getElementById("pac-input");
@@ -150,7 +150,6 @@
       
       if (data.action === "setRouteData") {
         if (data.routesGrouped && data.routesGrouped.length > 0) {
-           console.log(`📦 Received ${data.routesGrouped.length} Separate Routes.`);
            renderAllRoutes(data.routesGrouped, data.availableData);
         } else if (data.routeData && data.routeData.length > 0) {
            console.warn("⚠️ Warning: Received Flat List. Grouping logic missing in Flutter.");
@@ -190,7 +189,7 @@
           const routeId = group.routeId || "Unknown";
           const points = group.points;
 
-          console.log(`🔹 Drawing Route #${i+1} (ID: ${routeId}) with Color: ${color}`);
+          console.log(`🔹 Drawing Route #${i+1} (ID: ${routeId})`);
 
           legend.innerHTML += `
             <div class="legend-item">
@@ -199,7 +198,6 @@
             </div>
           `;
 
-          // This AWAIT is the key. It finishes Route A before touching Route B
           await processSingleRoute(routeId, points, color, bounds);
           i++;
         }
@@ -221,14 +219,13 @@
     function processSingleRoute(routeId, rawPoints, color, bounds) {
       return new Promise((resolve) => {
         
-        // Group points only for this specific route ID
+        // 1. Group points (15m tolerance logic is HERE)
         const clusters = groupCloseLocations(rawPoints);
         
-        // Create dedicated renderer with unique color
         const dService = new google.maps.DirectionsService();
         const dRenderer = new google.maps.DirectionsRenderer({
           map: map,
-          suppressMarkers: true,
+          suppressMarkers: true, // We draw our own
           preserveViewport: true,
           polylineOptions: { strokeColor: color, strokeOpacity: 0.8, strokeWeight: 6 }
         });
@@ -236,7 +233,7 @@
         const routeObj = { renderer: dRenderer, markers: [], routeId: routeId };
         window.activeRoutes.push(routeObj);
 
-        // Draw Markers
+        // 2. Draw Initial Markers (Will update text later)
         clusters.forEach(cluster => {
           if (cluster.hideMarker) return;
           const pos = { lat: cluster.lat, lng: cluster.lng };
@@ -258,15 +255,15 @@
 
           const html = buildInfoWindowHtml(cluster, pinHeader, color);
           const marker = createAdvancedMarker(pos, color, pinText, html, borderColor);
-          routeObj.markers.push(marker);
+          routeObj.markers.push(marker); // Save marker ref to update later
         });
 
-        // Optimization Logic
+        // 3. Find Key Points
         const startPoint = clusters.find(c => c.isStart);
         const endPoint = clusters.find(c => c.isFinal);
 
         if (!startPoint || !endPoint) {
-          console.warn(`⚠️ Route ${routeId} skipped calculation (Missing Start/End)`);
+          console.warn(`⚠️ Route ${routeId} skipped (Missing Start/End)`);
           resolve(); 
           return;
         }
@@ -278,10 +275,11 @@
           c !== startPoint && c !== endPoint && c !== assistantAM && c !== assistantPM
         );
 
+        // 4. Assistant Logic (Virtual Start/End)
         const virtualOrigin = assistantAM || startPoint;
         const virtualDest = assistantPM || endPoint;
 
-        // Calc Route
+        // 5. Optimization & Route Calc
         if (studentStops.length > 0) {
           dService.route({
             origin: { lat: virtualOrigin.lat, lng: virtualOrigin.lng },
@@ -299,32 +297,60 @@
               sortedStudents.forEach(s => finalWaypoints.push({ location: { lat: s.lat, lng: s.lng }, stopover: true }));
               if (assistantPM) finalWaypoints.push({ location: { lat: assistantPM.lat, lng: assistantPM.lng }, stopover: true });
 
-              drawFinalPolyline(dService, dRenderer, startPoint, endPoint, finalWaypoints, resolve);
+              // ✅ Draw line AND Update Numbers
+              drawFinalPolyline(dService, dRenderer, startPoint, endPoint, finalWaypoints, routeObj, resolve);
             } else {
               console.error(`Route ${routeId} Calc Failed: ${status}`);
               resolve();
             }
           });
         } else {
-          // Simple Route (Start -> [Assistants] -> End)
+          // Simple Route
           const simpleWaypoints = [];
           if (assistantAM) simpleWaypoints.push({ location: { lat: assistantAM.lat, lng: assistantAM.lng }, stopover: true });
           if (assistantPM) simpleWaypoints.push({ location: { lat: assistantPM.lat, lng: assistantPM.lng }, stopover: true });
-          drawFinalPolyline(dService, dRenderer, startPoint, endPoint, simpleWaypoints, resolve);
+          drawFinalPolyline(dService, dRenderer, startPoint, endPoint, simpleWaypoints, routeObj, resolve);
         }
       });
     }
 
-    function drawFinalPolyline(service, renderer, start, end, waypoints, onComplete) {
+    // 6. DRAW LINE & UPDATE MARKERS
+    function drawFinalPolyline(service, renderer, start, end, waypoints, routeObj, onComplete) {
       service.route({
         origin: { lat: start.lat, lng: start.lng },
         destination: { lat: end.lat, lng: end.lng },
         waypoints: waypoints,
         travelMode: google.maps.TravelMode.DRIVING,
-        optimizeWaypoints: false,
+        optimizeWaypoints: false, // Already optimized
       }, (result, status) => {
         if (status === "OK") {
           renderer.setDirections(result);
+
+          // ✅ UPDATE MARKER NUMBERS (1, 2, 3...)
+          waypoints.forEach((wp, index) => {
+            const stopNum = (index + 1).toString();
+            
+            // Find the marker in THIS route that matches this waypoint position
+            const m = routeObj.markers.find(mark => 
+              Math.abs(mark.position.lat - wp.location.lat) < 0.0005 && 
+              Math.abs(mark.position.lng - wp.location.lng) < 0.0005
+            );
+
+            // If found, update its Glyph Text
+            if (m && m.content && m.content.glyphText !== "A" && m.content.glyphText !== "P") {
+              // We create a new Pin to update the text efficiently
+              const bgColor = m.content.background;
+              const borderColor = m.content.borderColor;
+              
+              const newPin = new google.maps.marker.PinElement({
+                background: bgColor,
+                borderColor: borderColor,
+                glyphColor: "#FFFFFF",
+                glyphText: stopNum // ✅ 1, 2, 3...
+              });
+              m.content = newPin.element;
+            }
+          });
         }
         onComplete();
       });
