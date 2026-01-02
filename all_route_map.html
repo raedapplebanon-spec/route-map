@@ -7,7 +7,9 @@
     html, body { height: 100%; margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
     #map { height: 100%; width: 100%; }
     
+    /* ✅ FIX: Hide Search Bar initially */
     #pac-input {
+      display: none; /* Hidden until map loads */
       background-color: #fff;
       font-family: Roboto;
       font-size: 15px;
@@ -23,7 +25,9 @@
       outline: none;
     }
 
+    /* ✅ FIX: Hide Legend initially */
     #legend {
+      display: none; /* Hidden until map loads & data arrives */
       background: rgba(255, 255, 255, 0.95);
       margin: 10px;
       padding: 10px;
@@ -33,7 +37,6 @@
       max-height: 300px;
       overflow-y: auto;
       direction: rtl;
-      display: none; /* Hidden by default */
       min-width: 150px;
     }
     .legend-header { font-weight: bold; margin-bottom: 5px; border-bottom: 1px solid #ddd; padding-bottom: 5px; }
@@ -47,6 +50,7 @@
 
   <input id="pac-input" class="controls" type="text" placeholder="بحث عن طالب أو موقع..." />
   <div id="legend"></div>
+  
   <div id="map"></div>
 
   <script>
@@ -62,7 +66,6 @@
       "#00B8D4", "#C51162", "#3E2723", "#2E7D32", "#304FFE"
     ];
 
-    // 1. HELPER: Calculate Distance (For Grouping)
     function haversineDistance(lat1, lng1, lat2, lng2) {
       const R = 6371e3;
       const toRad = x => x * Math.PI / 180;
@@ -72,7 +75,6 @@
       return 2 * R * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
     }
 
-    // 2. HELPER: Group nearby stops (15m tolerance)
     function groupCloseLocations(stops, tolerance = 15) {
       const clusters = [];
       stops.forEach(stop => {
@@ -128,18 +130,24 @@
         mapId: "48c2bb983bd19c1c44d95cb7" // Required for Advanced Markers
       });
 
+      // --- SETUP CONTROLS (Only show AFTER map is ready) ---
       const input = document.getElementById("pac-input");
+      const legend = document.getElementById("legend");
+      
       const autocomplete = new google.maps.places.Autocomplete(input);
       autocomplete.bindTo("bounds", map);
+      
+      // Push to map
       map.controls[google.maps.ControlPosition.TOP_LEFT].push(input);
-
-      const legend = document.getElementById("legend");
       map.controls[google.maps.ControlPosition.RIGHT_BOTTOM].push(legend);
+
+      // ✅ FIX: Reveal the Search Bar now that it's attached
+      input.style.display = "block";
 
       mapReady = true;
       window.addEventListener("message", handleMessage);
       
-      console.log("✅ Map Initialized (Multi-Route Version)");
+      console.log("✅ Map Initialized (UI Jumping Fixed)");
     };
 
     function handleMessage(event) {
@@ -153,7 +161,6 @@
         if (data.routesGrouped && data.routesGrouped.length > 0) {
            renderAllRoutes(data.routesGrouped, data.availableData);
         } else if (data.routeData && data.routeData.length > 0) {
-           console.warn("⚠️ Warning: Received Flat List. Grouping logic missing in Flutter.");
            const fakeGroup = [{ routeId: "default", points: data.routeData }];
            renderAllRoutes(fakeGroup, data.availableData);
         } else {
@@ -162,7 +169,7 @@
       }
     }
 
-    // --- MAIN RENDERER (SEQUENTIAL) ---
+    // --- MAIN RENDERER ---
     async function renderAllRoutes(groupedRoutes, availableData) {
       if (!mapReady) return;
 
@@ -179,7 +186,7 @@
       const count = groupedRoutes ? groupedRoutes.length : 0;
       const bounds = new google.maps.LatLngBounds();
 
-      // ✅ FIX: Only show legend if we actually have routes
+      // ✅ FIX: Only show legend if we have data (stops "0 Routes" flash)
       if (count > 0) {
         legend.innerHTML = `<div class="legend-header">تم استلام: ${count} جولات</div>`;
         legend.style.display = "block";
@@ -189,8 +196,6 @@
           const color = COLORS[i % COLORS.length];
           const routeId = group.routeId || "Unknown";
           const points = group.points;
-
-          console.log(`🔹 Drawing Route #${i+1} (ID: ${routeId})`);
 
           legend.innerHTML += `
             <div class="legend-item">
@@ -203,7 +208,6 @@
           i++;
         }
       } else {
-        // ✅ Hide legend if 0 routes (Prevents the "Jumping" UI)
         legend.style.display = "none";
       }
 
@@ -221,7 +225,6 @@
     function processSingleRoute(routeId, rawPoints, color, bounds) {
       return new Promise((resolve) => {
         
-        // 1. Group points (15m tolerance)
         const clusters = groupCloseLocations(rawPoints);
         
         const dService = new google.maps.DirectionsService();
@@ -235,7 +238,7 @@
         const routeObj = { renderer: dRenderer, markers: [], routeId: routeId };
         window.activeRoutes.push(routeObj);
 
-        // 2. Draw Initial Markers
+        // Draw Markers
         clusters.forEach(cluster => {
           if (cluster.hideMarker) return;
           const pos = { lat: cluster.lat, lng: cluster.lng };
@@ -260,12 +263,11 @@
           routeObj.markers.push(marker);
         });
 
-        // 3. Find Key Points
+        // Optimization
         const startPoint = clusters.find(c => c.isStart);
         const endPoint = clusters.find(c => c.isFinal);
 
         if (!startPoint || !endPoint) {
-          console.warn(`⚠️ Route ${routeId} skipped (Missing Start/End)`);
           resolve(); 
           return;
         }
@@ -277,7 +279,6 @@
           c !== startPoint && c !== endPoint && c !== assistantAM && c !== assistantPM
         );
 
-        // 4. Optimization & Route Calc
         const virtualOrigin = assistantAM || startPoint;
         const virtualDest = assistantPM || endPoint;
 
@@ -300,12 +301,10 @@
 
               drawFinalPolyline(dService, dRenderer, startPoint, endPoint, finalWaypoints, routeObj, resolve);
             } else {
-              console.error(`Route ${routeId} Calc Failed: ${status}`);
               resolve();
             }
           });
         } else {
-          // Simple Route
           const simpleWaypoints = [];
           if (assistantAM) simpleWaypoints.push({ location: { lat: assistantAM.lat, lng: assistantAM.lng }, stopover: true });
           if (assistantPM) simpleWaypoints.push({ location: { lat: assistantPM.lat, lng: assistantPM.lng }, stopover: true });
@@ -314,7 +313,6 @@
       });
     }
 
-    // 6. DRAW LINE & UPDATE MARKERS
     function drawFinalPolyline(service, renderer, start, end, waypoints, routeObj, onComplete) {
       service.route({
         origin: { lat: start.lat, lng: start.lng },
@@ -326,10 +324,8 @@
         if (status === "OK") {
           renderer.setDirections(result);
 
-          // UPDATE MARKER NUMBERS
           waypoints.forEach((wp, index) => {
             const stopNum = (index + 1).toString();
-            
             const m = routeObj.markers.find(mark => 
               Math.abs(mark.position.lat - wp.location.lat) < 0.0005 && 
               Math.abs(mark.position.lng - wp.location.lng) < 0.0005
@@ -338,7 +334,6 @@
             if (m && m.content && m.content.glyphText !== "A" && m.content.glyphText !== "P") {
               const bgColor = m.content.background;
               const borderColor = m.content.borderColor;
-              
               const newPin = new google.maps.marker.PinElement({
                 background: bgColor,
                 borderColor: borderColor,
