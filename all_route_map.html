@@ -119,12 +119,13 @@
       infoWindow = new google.maps.InfoWindow();
 
       map = new Map(document.getElementById("map"), {
-        center: { lat: 33.8938, lng: 35.5018 },
-        zoom: 10,
+        // ✅ CHANGED: Center on School Location (Jordan) instead of Beirut
+        center: { lat: 32.028031, lng: 35.704308 },
+        zoom: 13,
         mapTypeControl: true,
         streetViewControl: false,
         fullscreenControl: false,
-        mapId: "48c2bb983bd19c1c44d95cb7" // ✅ REQUIRED for Advanced Markers
+        mapId: "48c2bb983bd19c1c44d95cb7" // Required for Advanced Markers
       });
 
       const input = document.getElementById("pac-input");
@@ -219,13 +220,13 @@
     function processSingleRoute(routeId, rawPoints, color, bounds) {
       return new Promise((resolve) => {
         
-        // 1. Group points (15m tolerance logic is HERE)
+        // 1. Group points (15m tolerance)
         const clusters = groupCloseLocations(rawPoints);
         
         const dService = new google.maps.DirectionsService();
         const dRenderer = new google.maps.DirectionsRenderer({
           map: map,
-          suppressMarkers: true, // We draw our own
+          suppressMarkers: true,
           preserveViewport: true,
           polylineOptions: { strokeColor: color, strokeOpacity: 0.8, strokeWeight: 6 }
         });
@@ -233,7 +234,7 @@
         const routeObj = { renderer: dRenderer, markers: [], routeId: routeId };
         window.activeRoutes.push(routeObj);
 
-        // 2. Draw Initial Markers (Will update text later)
+        // 2. Draw Initial Markers
         clusters.forEach(cluster => {
           if (cluster.hideMarker) return;
           const pos = { lat: cluster.lat, lng: cluster.lng };
@@ -255,7 +256,7 @@
 
           const html = buildInfoWindowHtml(cluster, pinHeader, color);
           const marker = createAdvancedMarker(pos, color, pinText, html, borderColor);
-          routeObj.markers.push(marker); // Save marker ref to update later
+          routeObj.markers.push(marker);
         });
 
         // 3. Find Key Points
@@ -275,11 +276,10 @@
           c !== startPoint && c !== endPoint && c !== assistantAM && c !== assistantPM
         );
 
-        // 4. Assistant Logic (Virtual Start/End)
+        // 4. Optimization & Route Calc
         const virtualOrigin = assistantAM || startPoint;
         const virtualDest = assistantPM || endPoint;
 
-        // 5. Optimization & Route Calc
         if (studentStops.length > 0) {
           dService.route({
             origin: { lat: virtualOrigin.lat, lng: virtualOrigin.lng },
@@ -297,7 +297,6 @@
               sortedStudents.forEach(s => finalWaypoints.push({ location: { lat: s.lat, lng: s.lng }, stopover: true }));
               if (assistantPM) finalWaypoints.push({ location: { lat: assistantPM.lat, lng: assistantPM.lng }, stopover: true });
 
-              // ✅ Draw line AND Update Numbers
               drawFinalPolyline(dService, dRenderer, startPoint, endPoint, finalWaypoints, routeObj, resolve);
             } else {
               console.error(`Route ${routeId} Calc Failed: ${status}`);
@@ -321,24 +320,21 @@
         destination: { lat: end.lat, lng: end.lng },
         waypoints: waypoints,
         travelMode: google.maps.TravelMode.DRIVING,
-        optimizeWaypoints: false, // Already optimized
+        optimizeWaypoints: false,
       }, (result, status) => {
         if (status === "OK") {
           renderer.setDirections(result);
 
-          // ✅ UPDATE MARKER NUMBERS (1, 2, 3...)
+          // UPDATE MARKER NUMBERS
           waypoints.forEach((wp, index) => {
             const stopNum = (index + 1).toString();
             
-            // Find the marker in THIS route that matches this waypoint position
             const m = routeObj.markers.find(mark => 
               Math.abs(mark.position.lat - wp.location.lat) < 0.0005 && 
               Math.abs(mark.position.lng - wp.location.lng) < 0.0005
             );
 
-            // If found, update its Glyph Text
             if (m && m.content && m.content.glyphText !== "A" && m.content.glyphText !== "P") {
-              // We create a new Pin to update the text efficiently
               const bgColor = m.content.background;
               const borderColor = m.content.borderColor;
               
@@ -346,7 +342,7 @@
                 background: bgColor,
                 borderColor: borderColor,
                 glyphColor: "#FFFFFF",
-                glyphText: stopNum // ✅ 1, 2, 3...
+                glyphText: stopNum 
               });
               m.content = newPin.element;
             }
