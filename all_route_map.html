@@ -4,12 +4,13 @@
   <meta charset="utf-8">
   <title>All Routes Admin Map</title>
   <style>
-    html, body { height: 100%; margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+    /* Prevent scrollbars to stop layout shifts */
+    html, body { height: 100%; margin: 0; padding: 0; overflow: hidden; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
     #map { height: 100%; width: 100%; }
     
-    /* ✅ FIX: Hide Search Bar initially */
+    /* ✅ STRICT FIX: Hide Search Bar initially */
     #pac-input {
-      display: none; /* Hidden until map loads */
+      display: none !important; /* Force hidden until map renders */
       background-color: #fff;
       font-family: Roboto;
       font-size: 15px;
@@ -25,9 +26,9 @@
       outline: none;
     }
 
-    /* ✅ FIX: Hide Legend initially */
+    /* ✅ STRICT FIX: Hide Legend initially */
     #legend {
-      display: none; /* Hidden until map loads & data arrives */
+      display: none !important; /* Force hidden until data arrives */
       background: rgba(255, 255, 255, 0.95);
       margin: 10px;
       padding: 10px;
@@ -121,33 +122,35 @@
       infoWindow = new google.maps.InfoWindow();
 
       map = new Map(document.getElementById("map"), {
-        // Center on School Location (Jordan)
         center: { lat: 32.028031, lng: 35.704308 },
         zoom: 13,
         mapTypeControl: true,
         streetViewControl: false,
         fullscreenControl: false,
-        mapId: "48c2bb983bd19c1c44d95cb7" // Required for Advanced Markers
+        mapId: "48c2bb983bd19c1c44d95cb7" 
       });
 
-      // --- SETUP CONTROLS (Only show AFTER map is ready) ---
+      // --- SETUP CONTROLS (Initially Hidden) ---
       const input = document.getElementById("pac-input");
       const legend = document.getElementById("legend");
       
       const autocomplete = new google.maps.places.Autocomplete(input);
       autocomplete.bindTo("bounds", map);
       
-      // Push to map
+      // Push to map (Still hidden by CSS)
       map.controls[google.maps.ControlPosition.TOP_LEFT].push(input);
       map.controls[google.maps.ControlPosition.RIGHT_BOTTOM].push(legend);
 
-      // ✅ FIX: Reveal the Search Bar now that it's attached
-      input.style.display = "block";
+      // ✅ FIX: Wait for Map Tiles to Load before showing Search Bar
+      // This prevents the "Jump" effect where controls appear before the map
+      google.maps.event.addListenerOnce(map, 'tilesloaded', () => {
+         input.style.display = "block"; 
+      });
 
       mapReady = true;
       window.addEventListener("message", handleMessage);
       
-      console.log("✅ Map Initialized (UI Jumping Fixed)");
+      console.log("✅ Map Initialized (Smooth Load)");
     };
 
     function handleMessage(event) {
@@ -186,7 +189,7 @@
       const count = groupedRoutes ? groupedRoutes.length : 0;
       const bounds = new google.maps.LatLngBounds();
 
-      // ✅ FIX: Only show legend if we have data (stops "0 Routes" flash)
+      // ✅ FIX: Only show legend if we have data
       if (count > 0) {
         legend.innerHTML = `<div class="legend-header">تم استلام: ${count} جولات</div>`;
         legend.style.display = "block";
