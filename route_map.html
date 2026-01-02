@@ -21,7 +21,7 @@
 
     /* 2. Search Bar Styling (Hidden Initially) */
     #pac-input {
-      display: none; /* ✅ Hidden until map is IDLE */
+      display: none; /* ✅ Hidden until moved into the map */
       background-color: #fff;
       font-family: 'Segoe UI', Tahoma, sans-serif;
       font-size: 15px;
@@ -63,7 +63,7 @@
 
     /* 4. Legend Styling (Hidden Initially) */
     .legend {
-      display: none; /* ✅ Hidden until map is IDLE */
+      display: none; /* ✅ Hidden until moved into the map */
       background: rgba(255, 255, 255, 0.95);
       padding: 10px 14px;
       border-radius: 8px;
@@ -123,8 +123,6 @@
       const clusters = [];
       stops.forEach(stop => {
         let placed = false;
-        
-        // Normalize data
         const type = (stop.stopType || "").toLowerCase().trim();
         const shift = (stop.timeShift || "").toUpperCase().trim();
 
@@ -134,7 +132,6 @@
             c.items.push(stop);
             if (stop.isStart === true) c.isStart = true;
             if (stop.isFinal === true) c.isFinal = true;
-            
             if (type === 'assistant') {
               c.stopType = 'assistant';
               if (shift) c.timeShift = shift;
@@ -165,7 +162,7 @@
       const summaryBox = document.getElementById("route-summary");
       const summaryText = document.getElementById("summary-text");
       if (summaryBox && summaryText) {
-        summaryBox.style.display = "block"; // Show when data is ready
+        summaryBox.style.display = "block"; 
         summaryText.innerHTML = "المسافة: <b>" + km + " كم</b><br>الوقت: <b>" + minutes + " دقيقة</b>";
       }
     }
@@ -181,7 +178,7 @@
 
         // Initialize Map
         map = new Map(document.getElementById("map"), {
-          center: { lat: 32.028031, lng: 35.704308 }, // Default: School Location
+          center: { lat: 32.028031, lng: 35.704308 },
           zoom: 13,
           mapId: MY_MAP_ID,
           mapTypeControl: true,
@@ -194,7 +191,7 @@
         const legend = document.getElementById("legend");
         const summary = document.getElementById("route-summary");
 
-        // Push controls to Map (Still hidden by CSS)
+        // ✅ 1. Push controls to Map (They are still hidden)
         map.controls[google.maps.ControlPosition.TOP_LEFT].push(input);
         map.controls[google.maps.ControlPosition.RIGHT_BOTTOM].push(legend);
         map.controls[google.maps.ControlPosition.LEFT_BOTTOM].push(summary);
@@ -202,11 +199,10 @@
         const autocomplete = new google.maps.places.Autocomplete(input);
         autocomplete.bindTo("bounds", map);
 
-        // ✅ FIX: Reveal UI Controls when map is IDLE (Fully Loaded)
-        google.maps.event.addListenerOnce(map, 'idle', () => {
-           input.style.display = "block";
-           legend.style.display = "block";
-        });
+        // ✅ 2. SHOW THEM NOW (Safe because they are inside the map container)
+        // We don't wait for 'idle' anymore because it's flaky.
+        input.style.display = "block";
+        legend.style.display = "block";
 
         // --- SEARCH LISTENER ---
         autocomplete.addListener("place_changed", () => {
@@ -227,7 +223,7 @@
                 return;
             }
 
-            // 2. SEARCH GOOGLE MAPS (Fallback)
+            // 2. SEARCH GOOGLE MAPS
             if (!place.geometry || !place.geometry.location) return;
 
             if (place.geometry.viewport) {
@@ -267,8 +263,6 @@
       const routeData = event.data.routeData || [];
       const availableData = event.data.availableData || [];
       
-      console.log("📩 Data Received:", routeData.length, "Route Items");
-
       if (mapReady) {
          window.setRouteData(routeData, availableData);
       } else {
@@ -467,7 +461,6 @@
                 );
                 
                 if (markerObj && markerObj.pin) {
-                     // Check if it's an assistant marker to avoid overwriting "A"/"P"
                      const currentText = markerObj.pin.glyphText;
                      if (currentText !== "A" && currentText !== "P") {
                          markerObj.pin.glyphText = stopNum;
