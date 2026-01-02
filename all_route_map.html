@@ -41,7 +41,7 @@
     .color-box { width: 15px; height: 15px; margin-left: 8px; border-radius: 3px; border: 1px solid #999; }
   </style>
 
-  <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCYaJ4Gjq36mq8swYgjNXOYr5mKZi45niA&libraries=places,marker&callback=initMap" async defer></script>
+  <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCYaJ4Gjq36mq8swYgjNXOYr5mKZi45niA&callback=initMap&libraries=marker,places,geometry&loading=async&v=weekly" async defer></script>
 </head>
 <body>
 
@@ -146,14 +146,11 @@
       }
       
       if (data.action === "setRouteData") {
-        // 🔥 CRITICAL: We prioritize 'routesGrouped'
         if (data.routesGrouped && data.routesGrouped.length > 0) {
            console.log(`📦 Received ${data.routesGrouped.length} Separate Routes.`);
            renderAllRoutes(data.routesGrouped, data.availableData);
         } else if (data.routeData && data.routeData.length > 0) {
-           // Fallback if Widget fails to group
            console.warn("⚠️ Warning: Received Flat List. Grouping logic missing in Flutter.");
-           // Create a fake single group to ensure it still draws
            const fakeGroup = [{ routeId: "default", points: data.routeData }];
            renderAllRoutes(fakeGroup, data.availableData);
         } else {
