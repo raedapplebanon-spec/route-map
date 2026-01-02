@@ -18,9 +18,9 @@
       width: 100%; 
     }
 
-    /* 2. Search Bar Styling (Hidden Initially to prevent Jump) */
+    /* 2. Search Bar Styling */
     #pac-input {
-      display: none !important; /* 🔥 CRITICAL: Hidden until map loads */
+      display: none; /* ✅ CHANGED: Removed !important so JS can show it later */
       background-color: #fff;
       font-family: 'Segoe UI', Tahoma, sans-serif;
       font-size: 15px;
@@ -95,7 +95,7 @@
         // Push Search Bar to Top Left (Still hidden)
         map.controls[google.maps.ControlPosition.TOP_LEFT].push(input);
 
-        // ✅ FIX: Reveal Search Box ONLY after map tiles load (Smooth!)
+        // ✅ FIX: Reveal Search Box ONLY after map tiles load
         google.maps.event.addListenerOnce(map, 'tilesloaded', () => {
            input.style.display = "block"; 
         });
