@@ -7,7 +7,6 @@
     html, body { height: 100%; margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
     #map { height: 100%; width: 100%; }
     
-    /* Search Box */
     #pac-input {
       background-color: #fff;
       font-family: Roboto;
@@ -24,7 +23,6 @@
       outline: none;
     }
 
-    /* Legend */
     #legend {
       background: rgba(255, 255, 255, 0.95);
       margin: 10px;
@@ -59,18 +57,9 @@
     window.activeRoutes = []; 
     window.availableMarkers = [];
 
-    // Distinct Colors for routes
     const COLORS = [
-      "#D50000", // Red
-      "#2962FF", // Blue
-      "#00C853", // Green
-      "#FF6D00", // Orange
-      "#AA00FF", // Purple
-      "#00B8D4", // Cyan
-      "#C51162", // Pink
-      "#3E2723", // Brown
-      "#2E7D32", // Dark Green
-      "#304FFE"  // Indigo
+      "#D50000", "#2962FF", "#00C853", "#FF6D00", "#AA00FF", 
+      "#00B8D4", "#C51162", "#3E2723", "#2E7D32", "#304FFE"
     ];
 
     function haversineDistance(lat1, lng1, lat2, lng2) {
@@ -82,7 +71,6 @@
       return 2 * R * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
     }
 
-    // Group stops geographically (Per Route)
     function groupCloseLocations(stops, tolerance = 15) {
       const clusters = [];
       stops.forEach(stop => {
@@ -147,7 +135,7 @@
       mapReady = true;
       window.addEventListener("message", handleMessage);
       
-      console.log("✅ Map Initialized and Ready");
+      console.log("✅ Map Initialized (Multi-Route Version)");
     };
 
     function handleMessage(event) {
@@ -156,9 +144,21 @@
       if (typeof data === 'string') {
         try { data = JSON.parse(data); } catch(e) { return; }
       }
+      
       if (data.action === "setRouteData") {
-        console.log("📦 Received Data Payload:", data);
-        renderAllRoutes(data.routesGrouped, data.availableData);
+        // 🔥 CRITICAL: We prioritize 'routesGrouped'
+        if (data.routesGrouped && data.routesGrouped.length > 0) {
+           console.log(`📦 Received ${data.routesGrouped.length} Separate Routes.`);
+           renderAllRoutes(data.routesGrouped, data.availableData);
+        } else if (data.routeData && data.routeData.length > 0) {
+           // Fallback if Widget fails to group
+           console.warn("⚠️ Warning: Received Flat List. Grouping logic missing in Flutter.");
+           // Create a fake single group to ensure it still draws
+           const fakeGroup = [{ routeId: "default", points: data.routeData }];
+           renderAllRoutes(fakeGroup, data.availableData);
+        } else {
+           renderAllRoutes([], data.availableData);
+        }
       }
     }
 
@@ -190,7 +190,7 @@
           const routeId = group.routeId || "Unknown";
           const points = group.points;
 
-          console.log(`🔹 Processing Route ${i+1}: ID=${routeId}, Points=${points.length}`);
+          console.log(`🔹 Drawing Route #${i+1} (ID: ${routeId}) with Color: ${color}`);
 
           legend.innerHTML += `
             <div class="legend-item">
@@ -374,6 +374,7 @@
                 <b style="color:${color}; font-size:14px;">${title}</b><hr>${rows}
               </div>`;
     }
+
   </script>
 </body>
 </html>
