@@ -33,7 +33,7 @@
       max-height: 300px;
       overflow-y: auto;
       direction: rtl;
-      display: none;
+      display: none; /* Hidden by default */
       min-width: 150px;
     }
     .legend-header { font-weight: bold; margin-bottom: 5px; border-bottom: 1px solid #ddd; padding-bottom: 5px; }
@@ -119,7 +119,7 @@
       infoWindow = new google.maps.InfoWindow();
 
       map = new Map(document.getElementById("map"), {
-        // ✅ CHANGED: Center on School Location (Jordan) instead of Beirut
+        // Center on School Location (Jordan)
         center: { lat: 32.028031, lng: 35.704308 },
         zoom: 13,
         mapTypeControl: true,
@@ -177,13 +177,13 @@
 
       const legend = document.getElementById("legend");
       const count = groupedRoutes ? groupedRoutes.length : 0;
-      legend.innerHTML = `<div class="legend-header">تم استلام: ${count} جولات</div>`;
-      legend.style.display = "block";
-
       const bounds = new google.maps.LatLngBounds();
 
-      // 2. Draw Routes One by One (await ensures separation)
-      if (groupedRoutes && groupedRoutes.length > 0) {
+      // ✅ FIX: Only show legend if we actually have routes
+      if (count > 0) {
+        legend.innerHTML = `<div class="legend-header">تم استلام: ${count} جولات</div>`;
+        legend.style.display = "block";
+        
         let i = 0;
         for (const group of groupedRoutes) {
           const color = COLORS[i % COLORS.length];
@@ -203,7 +203,8 @@
           i++;
         }
       } else {
-        legend.innerHTML += `<div class="legend-item" style="color:red">لا توجد بيانات جولات</div>`;
+        // ✅ Hide legend if 0 routes (Prevents the "Jumping" UI)
+        legend.style.display = "none";
       }
 
       // 3. Draw Available
