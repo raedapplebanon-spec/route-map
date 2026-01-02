@@ -10,7 +10,7 @@
       height: 100%; 
       margin: 0; 
       padding: 0; 
-      overflow: hidden; /* No scrollbars */
+      overflow: hidden; 
       font-family: 'Segoe UI', Tahoma, sans-serif; 
     }
     
@@ -21,7 +21,7 @@
 
     /* 2. Search Bar Styling (Hidden Initially) */
     #pac-input {
-      display: none; /* ✅ Hidden until map loads */
+      display: none; /* ✅ Hidden until map is IDLE */
       background-color: #fff;
       font-family: 'Segoe UI', Tahoma, sans-serif;
       font-size: 15px;
@@ -63,7 +63,7 @@
 
     /* 4. Legend Styling (Hidden Initially) */
     .legend {
-      display: none; /* ✅ Hidden until map loads */
+      display: none; /* ✅ Hidden until map is IDLE */
       background: rgba(255, 255, 255, 0.95);
       padding: 10px 14px;
       border-radius: 8px;
@@ -181,8 +181,7 @@
 
         // Initialize Map
         map = new Map(document.getElementById("map"), {
-          // ✅ Default: School Location (Jordan)
-          center: { lat: 32.028031, lng: 35.704308 },
+          center: { lat: 32.028031, lng: 35.704308 }, // Default: School Location
           zoom: 13,
           mapId: MY_MAP_ID,
           mapTypeControl: true,
@@ -203,8 +202,8 @@
         const autocomplete = new google.maps.places.Autocomplete(input);
         autocomplete.bindTo("bounds", map);
 
-        // ✅ FIX: Reveal UI Controls ONLY after tiles load
-        google.maps.event.addListenerOnce(map, 'tilesloaded', () => {
+        // ✅ FIX: Reveal UI Controls when map is IDLE (Fully Loaded)
+        google.maps.event.addListenerOnce(map, 'idle', () => {
            input.style.display = "block";
            legend.style.display = "block";
         });
