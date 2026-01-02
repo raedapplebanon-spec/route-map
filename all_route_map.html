@@ -4,45 +4,82 @@
   <meta charset="utf-8">
   <title>All Routes Admin Map</title>
   <style>
-    /* Prevent scrollbars to stop layout shifts */
-    html, body { height: 100%; margin: 0; padding: 0; overflow: hidden; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
-    #map { height: 100%; width: 100%; }
-    
-    /* ✅ STRICT FIX: Hide Search Bar initially */
-    #pac-input {
-      display: none !important; /* Force hidden until map renders */
-      background-color: #fff;
-      font-family: Roboto;
-      font-size: 15px;
-      font-weight: 300;
-      margin-left: 12px;
-      padding: 0 11px 0 13px;
-      text-overflow: ellipsis;
-      width: 300px;
-      height: 40px;
-      margin-top: 10px;
-      border: 1px solid #ccc;
-      box-shadow: 0 2px 6px rgba(0,0,0,0.3);
-      outline: none;
+    /* ✅ 1. Layout Settings */
+    html, body {
+      height: 100%;
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+      font-family: "Segoe UI", Tahoma, sans-serif;
     }
 
-    /* ✅ STRICT FIX: Hide Legend initially */
+    #map {
+      height: 100%;
+      width: 100%;
+    }
+
+    /* ✅ 2. Search Box (Hidden by default, NO !important) */
+    #pac-input {
+      display: none; /* Hidden until map loads */
+      background-color: #fff;
+      font-family: 'Segoe UI', Tahoma, sans-serif;
+      font-size: 14px;
+      font-weight: 500;
+      margin-top: 10px;
+      margin-left: 10px;
+      padding: 0 12px;
+      text-overflow: ellipsis;
+      width: 280px;
+      height: 40px;
+      border-radius: 8px;
+      border: 1px solid #ddd;
+      box-shadow: 0 4px 6px rgba(0,0,0,0.15);
+      outline: none;
+      direction: rtl;
+    }
+
+    #pac-input:focus {
+      border-color: #4d90fe;
+    }
+
+    /* ✅ 3. Legend (Hidden by default, NO !important) */
     #legend {
-      display: none !important; /* Force hidden until data arrives */
+      display: none; /* Hidden until data arrives */
       background: rgba(255, 255, 255, 0.95);
-      margin: 10px;
-      padding: 10px;
-      border-radius: 4px;
-      border: 1px solid #ccc;
-      font-size: 12px;
+      margin: 12px;
+      padding: 12px 16px;
+      border-radius: 8px;
+      font-size: 13px;
+      box-shadow: 0 4px 10px rgba(0,0,0,0.2);
       max-height: 300px;
       overflow-y: auto;
       direction: rtl;
-      min-width: 150px;
+      min-width: 160px;
+      border: 1px solid #eee;
     }
-    .legend-header { font-weight: bold; margin-bottom: 5px; border-bottom: 1px solid #ddd; padding-bottom: 5px; }
-    .legend-item { display: flex; align-items: center; margin-bottom: 4px; padding: 2px; }
-    .color-box { width: 15px; height: 15px; margin-left: 8px; border-radius: 3px; border: 1px solid #999; }
+
+    .legend-header {
+      font-weight: bold;
+      margin-bottom: 8px;
+      border-bottom: 1px solid #ddd;
+      padding-bottom: 6px;
+      color: #333;
+    }
+    
+    .legend-item {
+      display: flex;
+      align-items: center;
+      margin-bottom: 6px;
+      padding: 2px 0;
+    }
+
+    .color-box {
+      width: 14px;
+      height: 14px;
+      margin-left: 8px;
+      border-radius: 4px;
+      border: 1px solid rgba(0,0,0,0.1);
+    }
   </style>
 
   <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCYaJ4Gjq36mq8swYgjNXOYr5mKZi45niA&libraries=places,marker&callback=initMap&loading=async&v=weekly" async defer></script>
@@ -130,19 +167,17 @@
         mapId: "48c2bb983bd19c1c44d95cb7" 
       });
 
-      // --- SETUP CONTROLS (Initially Hidden) ---
       const input = document.getElementById("pac-input");
       const legend = document.getElementById("legend");
       
       const autocomplete = new google.maps.places.Autocomplete(input);
       autocomplete.bindTo("bounds", map);
       
-      // Push to map (Still hidden by CSS)
+      // Push controls to map
       map.controls[google.maps.ControlPosition.TOP_LEFT].push(input);
       map.controls[google.maps.ControlPosition.RIGHT_BOTTOM].push(legend);
 
-      // ✅ FIX: Wait for Map Tiles to Load before showing Search Bar
-      // This prevents the "Jump" effect where controls appear before the map
+      // ✅ FIX: Reveal Search Box ONLY after map tiles load (Smooth!)
       google.maps.event.addListenerOnce(map, 'tilesloaded', () => {
          input.style.display = "block"; 
       });
@@ -150,7 +185,7 @@
       mapReady = true;
       window.addEventListener("message", handleMessage);
       
-      console.log("✅ Map Initialized (Smooth Load)");
+      console.log("✅ Map Initialized");
     };
 
     function handleMessage(event) {
@@ -189,7 +224,7 @@
       const count = groupedRoutes ? groupedRoutes.length : 0;
       const bounds = new google.maps.LatLngBounds();
 
-      // ✅ FIX: Only show legend if we have data
+      // ✅ Logic: Show legend only if we have routes
       if (count > 0) {
         legend.innerHTML = `<div class="legend-header">تم استلام: ${count} جولات</div>`;
         legend.style.display = "block";
