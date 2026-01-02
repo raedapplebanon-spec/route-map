@@ -1,61 +1,79 @@
-html, body {
-  margin: 0;
-  padding: 0;
-  height: 100%;
-  overflow: hidden;
-  font-family: "Segoe UI", Tahoma, sans-serif;
-}
+<style>
+    /* ✅ 1. Layout Settings */
+    html, body {
+      height: 100%;
+      margin: 0;
+      padding: 0;
+      overflow: hidden; /* Stops scrollbars */
+      font-family: "Segoe UI", Tahoma, sans-serif;
+    }
 
-#map {
-  height: 100%;
-  width: 100%;
-}
+    #map {
+      height: 100%;
+      width: 100%;
+    }
 
-/* ⭐ Search Box Styling */
-#pac-input {
-  background-color: #fff;
-  font-family: 'Segoe UI', Tahoma, sans-serif;
-  font-size: 15px;
-  font-weight: 400;
-  margin-top: 10px;
-  padding: 0 12px;
-  text-overflow: ellipsis;
-  width: 260px; /* Adjust width as needed */
-  height: 40px;
-  border-radius: 8px;
-  border: 1px solid #ddd;
-  box-shadow: 0 2px 6px rgba(0,0,0,0.2);
-  outline: none;
-  direction: rtl; /* Supports Arabic search */
-  z-index: 1000;
-}
+    /* ✅ 2. Beautiful Search Box (Hidden Initially) */
+    #pac-input {
+      display: none !important; /* 🔥 CRITICAL: Prevents jumping on load */
+      background-color: #fff;
+      font-family: 'Segoe UI', Tahoma, sans-serif;
+      font-size: 14px;
+      font-weight: 500;
+      margin-top: 10px;
+      margin-left: 10px;
+      padding: 0 12px;
+      text-overflow: ellipsis;
+      width: 280px;
+      height: 40px;
+      border-radius: 8px; /* Rounded corners */
+      border: 1px solid #ddd;
+      box-shadow: 0 4px 6px rgba(0,0,0,0.15); /* Nice shadow */
+      outline: none;
+      direction: rtl; /* Arabic text support */
+    }
 
-#pac-input:focus {
-  border-color: #4d90fe;
-}
+    #pac-input:focus {
+      border-color: #4d90fe;
+    }
 
-/* Legend box */
-.legend {
-  position: absolute;
-  bottom: 12px;
-  right: 12px;
-  background: rgba(255, 255, 255, 0.95);
-  padding: 10px 14px;
-  border-radius: 8px;
-  font-size: 12px;
-  box-shadow: 0 2px 6px rgba(0,0,0,0.25);
-  z-index: 1000;
-}
+    /* ✅ 3. Beautiful Legend (Hidden Initially) */
+    #legend {
+      display: none !important; /* 🔥 CRITICAL: Prevents jumping on load */
+      background: rgba(255, 255, 255, 0.95);
+      margin: 12px;
+      padding: 12px 16px;
+      border-radius: 8px;
+      font-size: 13px;
+      box-shadow: 0 4px 10px rgba(0,0,0,0.2);
+      max-height: 300px;
+      overflow-y: auto;
+      direction: rtl;
+      min-width: 160px;
+      border: 1px solid #eee;
+    }
 
-.legend-row {
-  display: flex;
-  align-items: center;
-  margin-bottom: 6px;
-}
+    /* Legend Internal Items */
+    .legend-header {
+      font-weight: bold;
+      margin-bottom: 8px;
+      border-bottom: 1px solid #ddd;
+      padding-bottom: 6px;
+      color: #333;
+    }
+    
+    .legend-item {
+      display: flex;
+      align-items: center;
+      margin-bottom: 6px;
+      padding: 2px 0;
+    }
 
-.legend-color {
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
-  margin-left: 6px;
-}
+    .color-box {
+      width: 14px;
+      height: 14px;
+      margin-left: 8px;
+      border-radius: 4px; /* Soft edges */
+      border: 1px solid rgba(0,0,0,0.1);
+    }
+  </style>
