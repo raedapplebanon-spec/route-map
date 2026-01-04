@@ -20,7 +20,7 @@
 
     /* 2. Search Bar Styling */
     #pac-input {
-      display: none; /* ✅ CHANGED: Removed !important so JS can show it later */
+      display: none; /* Show only when map loads */
       background-color: #fff;
       font-family: 'Segoe UI', Tahoma, sans-serif;
       font-size: 15px;
@@ -63,7 +63,7 @@
 
         geocoder = new google.maps.Geocoder();
         
-        // ✅ Default: School Location (Jordan)
+        // Default: School Location (Jordan)
         const defaultPos = { lat: 32.028031, lng: 35.704308 };
 
         // 2. Initialize Map
@@ -72,7 +72,7 @@
           zoom: 15,
           mapId: "48c2bb983bd19c1c44d95cb7", // Required for Advanced Markers
           
-          // ✅ LAYOUT: Satellite on Right
+          // Layout
           mapTypeControl: true, 
           mapTypeControlOptions: {
               style: google.maps.MapTypeControlStyle.HORIZONTAL_BAR,
@@ -92,10 +92,10 @@
         // 4. SETUP SEARCH
         const input = document.getElementById("pac-input");
         
-        // Push Search Bar to Top Left (Still hidden)
+        // Push Search Bar to Top Left
         map.controls[google.maps.ControlPosition.TOP_LEFT].push(input);
 
-        // ✅ FIX: Reveal Search Box ONLY after map tiles load
+        // Reveal Search Box ONLY after map tiles load
         google.maps.event.addListenerOnce(map, 'tilesloaded', () => {
            input.style.display = "block"; 
         });
@@ -104,7 +104,7 @@
         autocomplete = new google.maps.places.Autocomplete(input);
         autocomplete.bindTo("bounds", map);
 
-        // 5. SEARCH LISTENER
+        // 5. SEARCH LISTENER (Triggers Action)
         autocomplete.addListener("place_changed", () => {
           const place = autocomplete.getPlace();
 
@@ -113,7 +113,6 @@
             return;
           }
 
-          // A. Move Map
           if (place.geometry.viewport) {
             map.fitBounds(place.geometry.viewport);
           } else {
@@ -121,22 +120,21 @@
             map.setZoom(17);
           }
 
-          // B. Move Marker
           marker.position = place.geometry.location;
 
-          // C. Send Data
-          updateFromMarker(); // Using helper ensures consistency
+          // Search = User Interaction -> Notify Flutter
+          updateFromMarker(true); 
         });
 
-        // 6. DRAG LISTENER
+        // 6. DRAG LISTENER (Triggers Action)
         marker.addListener("dragend", () => {
-          updateFromMarker();
+          updateFromMarker(true);
         });
 
-        // 7. CLICK LISTENER
+        // 7. CLICK LISTENER (Triggers Action)
         map.addListener("click", (e) => {
           marker.position = e.latLng;
-          updateFromMarker();
+          updateFromMarker(true);
         });
 
         console.log("✅ Picker Map Initialized");
@@ -147,16 +145,19 @@
     };
 
     // Helper: Update Search Text & App Data
-    function updateFromMarker() {
+    // ✅ FIX: Added 'shouldNotify' parameter (defaults to TRUE)
+    function updateFromMarker(shouldNotify = true) {
       const pos = marker.position;
       
-      // Handle both LatLng object and LatLngLiteral
       const lat = (typeof pos.lat === 'function') ? pos.lat() : pos.lat;
       const lng = (typeof pos.lng === 'function') ? pos.lng() : pos.lng;
       
-      sendToFlutter(lat, lng);
+      // ✅ FIX: Only send to Flutter if requested (True)
+      if (shouldNotify) {
+        sendToFlutter(lat, lng);
+      }
       
-      // Update Search Bar Text with Address
+      // Always update the visual address text
       if (geocoder) {
           geocoder.geocode({ location: {lat, lng} }, (results, status) => {
             if (status === "OK" && results[0]) {
@@ -173,7 +174,6 @@
     function sendToFlutter(lat, lng) {
       const data = { action: "locationPicked", lat: lat, lng: lng };
       
-      // Web / Windows WebView Support
       if (window.FlutterChan) {
           window.FlutterChan.postMessage(JSON.stringify(data));
       } else {
@@ -181,7 +181,7 @@
       }
     }
 
-    // Initial Position Handler (If editing an existing location)
+    // Initial Position Handler
     window.addEventListener("message", (event) => {
       let data = event.data;
       if (typeof data === 'string') {
@@ -195,14 +195,16 @@
         if (!isNaN(lat) && !isNaN(lng)) {
              const pos = { lat, lng };
              
-             // Retry loop to ensure map is ready before setting position
              const i = setInterval(() => {
                  if (map && marker) {
                      clearInterval(i);
                      map.setCenter(pos);
                      marker.position = pos;
                      map.setZoom(17);
-                     updateFromMarker(); // Update text address immediately
+                     
+                     // ✅ FIX: Pass FALSE here!
+                     // This updates the map/text visually but STOPS the Flutter action from firing.
+                     updateFromMarker(false); 
                  }
              }, 100);
         }
