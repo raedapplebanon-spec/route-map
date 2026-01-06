@@ -261,8 +261,7 @@
       }
     };
 
-    // --- 5. LOCATION TRACKING (Smart Bus & Approaches) ---
-    // --- 5. LOCATION TRACKING (Look-Ahead Radar) ---
+    // --- 5. LOCATION TRACKING (Smart Look-Ahead Radar) ---
     function startLocationTracking() {
         if (!navigator.geolocation) return;
 
@@ -320,14 +319,11 @@
 
                 // B. If we have a queue, Check the NEXT 3 stops (The Window)
                 if (firstPendingIndex !== -1) {
-                    // Check up to 3 stops ahead (firstPending, +1, +2)
-                    // You can change '3' to '5' if you want a larger window
                     const lookAheadCount = 3; 
                     
                     for (let k = 0; k < lookAheadCount; k++) {
                         const targetIndex = firstPendingIndex + k;
                         
-                        // Stop if we run out of stops in the list
                         if (targetIndex >= window.orderedStopIds.length) break;
 
                         const targetId = window.orderedStopIds[targetIndex];
@@ -354,7 +350,7 @@
                 }
             }
 
-            // 4. CHECK FINAL ARRIVAL (Unchanged)
+            // 4. CHECK FINAL ARRIVAL (End Trip)
             if (!hasTriggeredArrival) {
                 let targetLoc = null;
                 let triggerRadius = 50; 
@@ -386,6 +382,7 @@
             }
         }, (err) => console.log("Loc Error:", err), { enableHighAccuracy: true });
     }
+
     // --- 6. DATA HANDLING ---
     window.addEventListener("message", function (event) {
       if (!event.data) return;
@@ -404,7 +401,18 @@
       }
     });
 
+    // 🔥 MODIFIED: PRESERVE ALERT MEMORY ON REFRESH
     window.setRouteData = function(stops, shift) {
+      // 1. MEMORY SAVE: Backup IDs of students already alerted
+      const alertedStudentIds = new Set();
+      if (window.routeMarkers) {
+          window.routeMarkers.forEach(m => {
+              if (m.hasTriggeredApproach) {
+                  m.items.forEach(s => alertedStudentIds.add(s.id));
+              }
+          });
+      }
+
       currentShift = shift; 
       
       window.routeMarkers.forEach(obj => obj.marker.map = null);
@@ -418,7 +426,9 @@
       
       endStopLocation = null;
       pmLastStudentLocation = null;
-      hasTriggeredArrival = false;
+      // Note: We don't reset hasTriggeredArrival here if we want to remember End Trip too, 
+      // but usually End Trip requires action so reset is fine.
+      hasTriggeredArrival = false; 
 
       const addMarker = (cluster, color, text, html) => {
          const pin = new google.maps.marker.PinElement({
@@ -437,22 +447,21 @@
          marker.addListener("click", () => {
              infoWindow.setContent(html);
              infoWindow.open(map, marker);
-             if(cluster.items.length > 0) {
-                 // sendToFlutter({ action: 'stopClicked', id: cluster.items[0].id });
-             }
          });
          
+         // 2. MEMORY RESTORE: Check if this cluster contains already alerted students
+         const isAlreadyTriggered = cluster.items.some(s => alertedStudentIds.has(s.id));
+
          window.routeMarkers.push({
              marker, pin,
              names: cluster.items.map(i => i.name || ""),
              html, 
              lat: cluster.lat, 
              lng: cluster.lng,
-             // 🔥 NEW: Save stop metadata for approach checks
              isStart: cluster.isStart,
              isEnd: cluster.isEnd,
-             items: cluster.items, // contains IDs
-             hasTriggeredApproach: false // Reset trigger
+             items: cluster.items, 
+             hasTriggeredApproach: isAlreadyTriggered // 🔥 RESTORE LOCK
          });
       };
 
@@ -566,7 +575,9 @@
                let dist = 0, dur = 0;
                result.routes[0].legs.forEach(l => { dist += l.distance.value; dur += l.duration.value; });
                updateRouteSummary((dist/1000).toFixed(1), Math.round(dur/60));
-              window.orderedStopIds = orderedIds;
+
+               // 🔥 IMPORTANT: Update Global Order for Radar
+               window.orderedStopIds = orderedIds; 
                sendToFlutter({ action: 'routeOrdered', orderedIds: orderedIds });
            }
        });
