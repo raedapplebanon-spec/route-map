@@ -94,7 +94,6 @@
   <div id="legend" class="legend">
     <div class="legend-row"><div class="legend-color" style="background:#00c853"></div><span>البداية (Start)</span></div>
     <div class="legend-row"><div class="legend-color" style="background:#d50000"></div><span>النهاية (End)</span></div>
-    <div class="legend-row"><div class="legend-color" style="background:#9C27B0"></div><span>المرافق (Escort)</span></div>
     <div class="legend-row"><div class="legend-color" style="background:#d32f2f"></div><span>قيد الانتظار (Pending)</span></div>
     <div class="legend-row"><div class="legend-color" style="background:#388e3c"></div><span>مكتمل (Done)</span></div>
     <div class="legend-row"><div class="legend-color" style="background:#757575"></div><span>مستبعد (Excluded)</span></div>
@@ -120,7 +119,7 @@
 
     // --- 1. HELPER: Calculate Distance (Haversine) ---
     function haversineDistance(lat1, lng1, lat2, lng2) {
-      const R = 6371e3; // meters
+      const R = 6371e3; 
       const toRad = x => x * Math.PI / 180;
       const dLat = toRad(lat2 - lat1);
       const dLng = toRad(lng2 - lng1);
@@ -134,23 +133,19 @@
       stops.forEach(stop => {
         let placed = false;
         
-        // Find a nearby cluster
         for (const c of clusters) {
           const d = haversineDistance(c.lat, c.lng, parseFloat(stop.lat), parseFloat(stop.lng));
           if (d < tolerance) {
             c.items.push(stop);
-            // Merge properties
             if (stop.isStart) c.isStart = true;
             if (stop.isEnd) c.isEnd = true;
             if (stop.type === 'assistant') c.stopType = 'assistant';
-            // If ANY student in this group is NOT excluded, the group is valid
             if (!stop.isExcluded) c.isExcluded = false;
             placed = true;
             break;
           }
         }
 
-        // Create new cluster if none found
         if (!placed) {
           clusters.push({
             lat: parseFloat(stop.lat),
@@ -194,7 +189,6 @@
           fullscreenControl: false
         });
 
-        // Setup Controls
         const input = document.getElementById("pac-input");
         const legend = document.getElementById("legend");
         const summary = document.getElementById("route-summary");
@@ -203,7 +197,6 @@
         map.controls[google.maps.ControlPosition.RIGHT_BOTTOM].push(legend);
         map.controls[google.maps.ControlPosition.LEFT_BOTTOM].push(summary);
 
-        // Search Autocomplete
         const autocomplete = new google.maps.places.Autocomplete(input);
         autocomplete.bindTo("bounds", map);
 
@@ -212,12 +205,10 @@
            legend.style.display = "block";
         });
 
-        // Search Logic
         autocomplete.addListener("place_changed", () => {
             const place = autocomplete.getPlace();
             const searchText = (place.name || input.value || "").toLowerCase();
 
-            // Search internal markers first
             const foundMarker = window.routeMarkers.find(m => 
                 m.names.some(n => n.toLowerCase().includes(searchText))
             );
@@ -230,30 +221,27 @@
                 return;
             }
 
-            // Google Search fallback
             if (place.geometry && place.geometry.location) {
                 map.setCenter(place.geometry.location);
                 map.setZoom(17);
             }
         });
 
-        // Directions
         directionsService = new google.maps.DirectionsService();
         directionsRenderer = new google.maps.DirectionsRenderer({
             map: map,
-            suppressMarkers: true, // We draw custom markers
+            suppressMarkers: true,
             preserveViewport: true,
             polylineOptions: { strokeColor: "#1a73e8", strokeOpacity: 0.8, strokeWeight: 5 }
         });
 
-        // Start Blue Dot Tracking
         startLocationTracking();
 
         mapReady = true;
         console.log("✅ Assistant Map Initialized");
 
         if (window.pendingData) {
-            window.setRouteData(window.pendingData.stops);
+            window.setRouteData(window.pendingData.stops, window.pendingData.shift);
             window.pendingData = null;
         }
 
@@ -262,7 +250,7 @@
       }
     };
 
-    // --- 5. LOCATION TRACKING (Blue Dot) ---
+    // --- 5. LOCATION TRACKING ---
     function startLocationTracking() {
         if (!navigator.geolocation) return;
 
@@ -271,9 +259,7 @@
             const lng = pos.coords.longitude;
             const myLoc = { lat, lng };
 
-            // Create/Update Blue Dot
             if (!userLocationMarker) {
-                // Using SVG Circle for Blue Dot
                 userLocationMarker = new google.maps.Marker({
                     map: map,
                     position: myLoc,
@@ -292,13 +278,12 @@
                 userLocationMarker.setPosition(myLoc);
             }
 
-            // Arrival Check
             if (endStopLocation && !hasTriggeredArrival) {
                 const endLoc = new google.maps.LatLng(endStopLocation.lat, endStopLocation.lng);
                 const currentLoc = new google.maps.LatLng(lat, lng);
                 const dist = google.maps.geometry.spherical.computeDistanceBetween(currentLoc, endLoc);
                 
-                if (dist < 50) { // 50 meters arrival radius
+                if (dist < 50) {
                     hasTriggeredArrival = true;
                     sendToFlutter({ action: 'arrivedAtEnd' });
                 }
@@ -309,31 +294,34 @@
     // --- 6. DATA HANDLING ---
     window.addEventListener("message", function (event) {
       if (!event.data) return;
-      // Handle JSON parsing
       let data = event.data;
       if (typeof data === 'string') { try { data = JSON.parse(data); } catch(e){} }
       
       if (data.action === "setDriverRoute") {
           const stops = data.stops || [];
+          const shift = data.shift || "AM"; // ✅ Read Shift from Flutter
+          
           if (mapReady) {
-             window.setRouteData(stops);
+             window.setRouteData(stops, shift);
           } else {
-             window.pendingData = { stops: stops };
+             window.pendingData = { stops: stops, shift: shift };
           }
       }
     });
 
-    window.setRouteData = function(stops) {
-      // Cleanup
+    // ✅ UPDATED: Accept Shift Parameter
+    window.setRouteData = function(stops, shift) {
       window.routeMarkers.forEach(obj => obj.marker.map = null);
       window.routeMarkers = [];
       directionsRenderer.setDirections({ routes: [] });
       document.getElementById("route-summary").style.display = "none";
       
       const bounds = new google.maps.LatLngBounds();
-      const clusters = groupCloseLocations(stops, 15); // 15m tolerance
+      const clusters = groupCloseLocations(stops, 15);
 
-      // Define Marker Helper
+      // ✅ Determine if PM Shift
+      const isPM = (shift === 'PM');
+
       const addMarker = (cluster, color, text, html) => {
          const pin = new google.maps.marker.PinElement({
              background: color,
@@ -351,8 +339,6 @@
          marker.addListener("click", () => {
              infoWindow.setContent(html);
              infoWindow.open(map, marker);
-             // Inform Flutter of click
-             // If multiple students, send the ID of the first one
              if(cluster.items.length > 0) {
                  sendToFlutter({ action: 'stopClicked', id: cluster.items[0].id });
              }
@@ -365,13 +351,15 @@
          });
       };
 
-      // Loop Clusters to Draw Markers
       clusters.forEach(cluster => {
           const pos = { lat: cluster.lat, lng: cluster.lng };
           bounds.extend(pos);
 
-          // Determine Style based on Cluster Content
-          let color = "#1a73e8"; // Default Blue
+          if (cluster.stopType === 'assistant') {
+              return; 
+          }
+
+          let color = "#1a73e8"; 
           let text = cluster.items.length.toString();
           let header = "نقطة تجمع";
 
@@ -379,33 +367,34 @@
              color = "#00c853"; text = "S"; header = "نقطة البداية";
           } else if (cluster.isEnd) {
              color = "#d50000"; text = "E"; header = "نقطة النهاية";
-             endStopLocation = pos; // Save for arrival check
+             endStopLocation = pos;
              hasTriggeredArrival = false;
-          } else if (cluster.stopType === 'assistant') {
-             color = "#9C27B0"; text = "A"; header = "المرافق";
           } else if (cluster.isExcluded) {
-             color = "#757575"; // Gray
+             color = "#757575"; 
           } else {
-             // Student Logic: Check Status
-             // If ALL are picked/dropped -> Green/Blue
-             // If ANY is pending -> Red
              const allDone = cluster.items.every(s => s.status === 'picked' || s.status === 'dropped');
-             const anyDropped = cluster.items.some(s => s.status === 'dropped');
-             
              if (allDone) {
-                 color = anyDropped ? "#1976D2" : "#388e3c"; // Blue (PM) or Green (AM)
+                 color = "#388e3c"; 
              } else {
-                 color = "#d32f2f"; // Red (Pending)
+                 color = "#d32f2f"; 
              }
           }
 
-          // Build Info Window HTML
           let rows = cluster.items.map(s => {
               let badgeColor = 'bg-red';
-              let statusTxt = 'Pending';
-              if (s.status === 'picked') { badgeColor = 'bg-green'; statusTxt = 'Picked'; }
-              if (s.status === 'dropped') { badgeColor = 'bg-blue'; statusTxt = 'Dropped'; }
-              if (s.isExcluded) { badgeColor = 'bg-gray'; statusTxt = 'Excluded'; }
+              // ✅ CORRECT ARABIC STATUS TEXT BASED ON SHIFT
+              let statusTxt = isPM ? 'لم يتم التنزيل' : 'لم يتم التحميل'; 
+
+              if (s.status === 'picked') { 
+                  badgeColor = 'bg-green'; 
+                  statusTxt = 'تم التحميل'; 
+              } else if (s.status === 'dropped') { 
+                  badgeColor = 'bg-green'; 
+                  statusTxt = 'تم التنزيل'; 
+              } else if (s.isExcluded) { 
+                  badgeColor = 'bg-gray'; 
+                  statusTxt = 'مستبعد'; 
+              }
 
               return `<div style="margin-bottom:6px; border-bottom:1px solid #eee; padding-bottom:4px;">
                         <span class="status-badge ${badgeColor}">${statusTxt}</span>
@@ -426,61 +415,45 @@
       if (!bounds.isEmpty()) map.fitBounds(bounds);
     };
 
-    // --- 7. ROUTE CALCULATION (Assistant Logic) ---
+    // --- 7. ROUTE CALCULATION ---
     function calculateRoadRoute(clusters) {
        const startPoint = clusters.find(c => c.isStart);
        const endPoint = clusters.find(c => c.isEnd);
        if (!startPoint || !endPoint) return;
 
-       // Filter out Excluded stops from the PATH (but markers stay)
        const activeClusters = clusters.filter(c => !c.isExcluded);
 
-       // Identify Assistants (AM/PM)
-       // Note: Depending on your data, assistant might just be marked 'assistant'
-       // We assume the one near Start is AM, one near End is PM, or just rely on 'assistant' type.
        const assistants = activeClusters.filter(c => c.stopType === 'assistant');
-       
-       // Students are everything else
        const students = activeClusters.filter(c => c !== startPoint && c !== endPoint && c.stopType !== 'assistant');
 
-       // Build Waypoints
        let waypoints = [];
        assistants.forEach(a => waypoints.push({ location: {lat: a.lat, lng: a.lng}, stopover: true }));
        students.forEach(s => waypoints.push({ location: {lat: s.lat, lng: s.lng}, stopover: true }));
 
-       // Google Route Request
        directionsService.route({
            origin: { lat: startPoint.lat, lng: startPoint.lng },
            destination: { lat: endPoint.lat, lng: endPoint.lng },
            waypoints: waypoints,
            travelMode: google.maps.TravelMode.DRIVING,
-           optimizeWaypoints: true, // 🔥 Optimize Order
+           optimizeWaypoints: true,
        }, (result, status) => {
            if (status === "OK") {
                directionsRenderer.setDirections(result);
                
-               // Extract Optimized Order & Send to Flutter
                const orderIndices = result.routes[0].waypoint_order;
                let orderedIds = [];
                
-               // 1. Start ID
                orderedIds.push(startPoint.items[0].id);
-               
-               // 2. Optimized Middle IDs
                orderIndices.forEach(idx => {
-                   const cluster = [...assistants, ...students][idx]; // Reconstruct source array
+                   const cluster = [...assistants, ...students][idx];
                    cluster.items.forEach(item => orderedIds.push(item.id));
                });
-
-               // 3. End ID
                orderedIds.push(endPoint.items[0].id);
 
-               // Update Summary
                let dist = 0, dur = 0;
                result.routes[0].legs.forEach(l => { dist += l.distance.value; dur += l.duration.value; });
                updateRouteSummary((dist/1000).toFixed(1), Math.round(dur/60));
 
-               // Send Back
                sendToFlutter({ action: 'routeOrdered', orderedIds: orderedIds });
            }
        });
