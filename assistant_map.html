@@ -262,10 +262,29 @@
     };
 
     // --- 5. LOCATION TRACKING (Smart Look-Ahead Radar) ---
-    function startLocationTracking() {
-        if (!navigator.geolocation) return;
+    // Global variable to track the watcher (prevents duplicates)
+    let locationWatchId = null;
 
-        navigator.geolocation.watchPosition((pos) => {
+    function startLocationTracking() {
+        if (!navigator.geolocation) {
+            console.log("❌ Geolocation not supported");
+            return;
+        }
+
+        // 1. CLEAR PREVIOUS WATCHER (Important for restarts)
+        if (locationWatchId !== null) {
+            navigator.geolocation.clearWatch(locationWatchId);
+            locationWatchId = null;
+        }
+
+        const options = {
+            enableHighAccuracy: true,
+            maximumAge: 0,
+            timeout: 10000 // Wait 10s before considering it a "Timeout" error
+        };
+
+        locationWatchId = navigator.geolocation.watchPosition((pos) => {
+            // --- ✅ SUCCESS: GPS IS WORKING ---
             const lat = pos.coords.latitude;
             const lng = pos.coords.longitude;
             const myLoc = { lat, lng };
@@ -380,9 +399,21 @@
                     }
                 }
             }
-        }, (err) => console.log("Loc Error:", err), { enableHighAccuracy: true });
-    }
 
+        }, (err) => {
+            // --- ❌ ERROR: GPS STOPPED WORKING ---
+            console.warn(`⚠️ GPS Error (${err.code}): ${err.message}`);
+            
+            // Code 2 = Position Unavailable (Simulator issue / Tunnel)
+            // Code 3 = Timeout
+            if (err.code === 2 || err.code === 3) {
+                console.log("🔄 Connection lost. Restarting GPS tracking in 2 seconds...");
+                
+                // 🔥 THE FIX: Automatically restart after 2 seconds
+                setTimeout(startLocationTracking, 2000);
+            }
+        }, options);
+    }
     // --- 6. DATA HANDLING ---
     window.addEventListener("message", function (event) {
       if (!event.data) return;
