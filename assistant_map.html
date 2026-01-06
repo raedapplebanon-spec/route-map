@@ -112,7 +112,11 @@
     window.routeMarkers = [];
     let map, directionsService, directionsRenderer, infoWindow;
     let mapReady = false;
-    let endStopLocation = null;
+    
+    // Arrival Logic Variables
+    let currentShift = "AM"; // Default
+    let endStopLocation = null; // The Red Pin (School in AM, Parking in PM)
+    let pmLastStudentLocation = null; // The LAST student stop (for PM logic)
     let hasTriggeredArrival = false;
     let userLocationMarker = null;
 
@@ -251,7 +255,7 @@
       }
     };
 
-    // --- 5. LOCATION TRACKING ---
+    // --- 5. LOCATION TRACKING (The Smart Part) ---
     function startLocationTracking() {
         if (!navigator.geolocation) return;
 
@@ -279,14 +283,38 @@
                 userLocationMarker.setPosition(myLoc);
             }
 
-            if (endStopLocation && !hasTriggeredArrival) {
-                const endLoc = new google.maps.LatLng(endStopLocation.lat, endStopLocation.lng);
-                const currentLoc = new google.maps.LatLng(lat, lng);
-                const dist = google.maps.geometry.spherical.computeDistanceBetween(currentLoc, endLoc);
-                
-                if (dist < 1000) {
-                    hasTriggeredArrival = true;
-                    sendToFlutter({ action: 'arrivedAtEnd' });
+            // 🔥 ARRIVAL LOGIC
+            if (!hasTriggeredArrival) {
+                let targetLoc = null;
+                let triggerRadius = 50; // Default safety
+
+                if (currentShift === 'AM') {
+                    // AM: Target is the END STOP (School) -> 1 KM Radius
+                    if (endStopLocation) {
+                        targetLoc = endStopLocation;
+                        triggerRadius = 1000;
+                    }
+                } else {
+                    // PM: Target is the LAST STUDENT -> 100 M Radius
+                    // If we found a last student, use them. Otherwise fallback to End Stop.
+                    if (pmLastStudentLocation) {
+                        targetLoc = pmLastStudentLocation;
+                        triggerRadius = 100;
+                    } else if (endStopLocation) {
+                        targetLoc = endStopLocation;
+                        triggerRadius = 100;
+                    }
+                }
+
+                if (targetLoc) {
+                    const t = new google.maps.LatLng(targetLoc.lat, targetLoc.lng);
+                    const c = new google.maps.LatLng(lat, lng);
+                    const dist = google.maps.geometry.spherical.computeDistanceBetween(c, t);
+                    
+                    if (dist < triggerRadius) {
+                        hasTriggeredArrival = true;
+                        sendToFlutter({ action: 'arrivedAtEnd' });
+                    }
                 }
             }
         }, (err) => console.log("Loc Error:", err), { enableHighAccuracy: true });
@@ -311,6 +339,8 @@
     });
 
     window.setRouteData = function(stops, shift) {
+      currentShift = shift; // ✅ Update Global Shift
+      
       window.routeMarkers.forEach(obj => obj.marker.map = null);
       window.routeMarkers = [];
       directionsRenderer.setDirections({ routes: [] });
@@ -318,7 +348,12 @@
       
       const bounds = new google.maps.LatLngBounds();
       const clusters = groupCloseLocations(stops, 15);
-      const isPM = (shift === 'PM');
+      const isPM = (currentShift === 'PM');
+      
+      // Reset Tracking Variables
+      endStopLocation = null;
+      pmLastStudentLocation = null;
+      hasTriggeredArrival = false;
 
       const addMarker = (cluster, color, text, html) => {
          const pin = new google.maps.marker.PinElement({
@@ -361,10 +396,8 @@
              color = "#00c853"; text = "S"; header = "نقطة البداية";
           } else if (cluster.isEnd) {
              color = "#d50000"; text = "E"; header = "نقطة النهاية";
-             endStopLocation = pos;
-             hasTriggeredArrival = false;
+             endStopLocation = pos; // Save End Stop
           } else if (cluster.stopType === 'assistant') {
-             // ✅ RESTORED: Show Assistant Marker as Purple
              color = "#9C27B0"; text = "A"; header = "المرافق";
           } else if (cluster.isExcluded) {
              color = "#757575"; 
@@ -379,14 +412,11 @@
 
           // Build Info Window
           let rows = cluster.items.map(s => {
-              // ✅ SPECIAL CASE: Assistants get NO status badge
               if (s.type === 'assistant') {
                   return `<div style="margin-bottom:6px; border-bottom:1px solid #eee; padding-bottom:4px;">
                             <b>${s.name || 'مرافق'}</b>
                           </div>`;
               }
-
-              // Normal Student Logic
               let badgeColor = 'bg-red';
               let statusTxt = isPM ? 'لم يتم التنزيل' : 'لم يتم التحميل'; 
 
@@ -417,7 +447,7 @@
       if (!bounds.isEmpty()) map.fitBounds(bounds);
     };
 
-    // --- 7. ROUTE CALCULATION ---
+    // --- 7. ROUTE CALCULATION (Find Last Student for PM) ---
     function calculateRoadRoute(clusters) {
        const startPoint = clusters.find(c => c.isStart);
        const endPoint = clusters.find(c => c.isEnd);
@@ -445,6 +475,7 @@
                const orderIndices = result.routes[0].waypoint_order;
                let orderedIds = [];
                
+               // Reconstruct Route
                orderedIds.push(startPoint.items[0].id);
                orderIndices.forEach(idx => {
                    const cluster = [...assistants, ...students][idx];
@@ -452,6 +483,18 @@
                });
                orderedIds.push(endPoint.items[0].id);
 
+               // 🔥 IDENTIFY LAST STUDENT LOCATION (For PM Logic)
+               if (currentShift === 'PM' && orderIndices.length > 0) {
+                   // The last item in orderIndices is the LAST stop visited before End
+                   const lastIndex = orderIndices[orderIndices.length - 1];
+                   const lastCluster = [...assistants, ...students][lastIndex];
+                   if (lastCluster) {
+                       pmLastStudentLocation = { lat: lastCluster.lat, lng: lastCluster.lng };
+                       console.log("📍 PM Last Student Location Set:", pmLastStudentLocation);
+                   }
+               }
+
+               // Summary
                let dist = 0, dur = 0;
                result.routes[0].legs.forEach(l => { dist += l.distance.value; dur += l.duration.value; });
                updateRouteSummary((dist/1000).toFixed(1), Math.round(dur/60));
