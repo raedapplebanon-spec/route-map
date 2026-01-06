@@ -566,7 +566,7 @@
                let dist = 0, dur = 0;
                result.routes[0].legs.forEach(l => { dist += l.distance.value; dur += l.duration.value; });
                updateRouteSummary((dist/1000).toFixed(1), Math.round(dur/60));
-
+              window.orderedStopIds = orderedIds;
                sendToFlutter({ action: 'routeOrdered', orderedIds: orderedIds });
            }
        });
