@@ -623,6 +623,45 @@
         }
     }
 
+    // 🔥 FOR TESTING ONLY: Force the bus to jump to a specific stop
+    window.forceJumpToStop = function(stopIndex) {
+        if (!window.orderedStopIds || !window.routeMarkers) return;
+        
+        // 1. Get the target stop
+        const targetId = window.orderedStopIds[stopIndex];
+        const targetMarker = window.routeMarkers.find(m => m.items.some(item => item.id === targetId));
+        
+        if (targetMarker) {
+            console.log(`🚀 Jumping bus to 1.9km away from: ${targetMarker.names[0]}`);
+            
+            // 2. Create a fake coordinate slightly offset (approx 1.9km away)
+            // 0.018 degrees lat is roughly 2km
+            const fakeLat = targetMarker.lat - 0.01; 
+            const fakeLng = targetMarker.lng - 0.01;
+
+            // 3. Manually run the logic (Simulate a GPS update)
+            // We re-use the exact code logic here to prove it works
+            const myLocObj = new google.maps.LatLng(fakeLat, fakeLng);
+            const stopLoc = new google.maps.LatLng(targetMarker.lat, targetMarker.lng);
+            const dist = google.maps.geometry.spherical.computeDistanceBetween(myLocObj, stopLoc);
+            
+            console.log(`📏 Calculated Distance: ${Math.round(dist)} meters`);
+
+            if (dist < 2000) {
+                 const ids = targetMarker.items.map(i => i.id);
+                 // Send the alert!
+                 sendToFlutter({ 
+                    action: 'stopApproaching', 
+                    stopIds: ids, 
+                    stopName: targetMarker.names[0] || "Stop" 
+                });
+                console.log(`✅ SUCCESS! Triggered alert for ${targetMarker.names[0]}`);
+            } else {
+                console.log("❌ Too far away to trigger.");
+            }
+        }
+    };
+
   </script>
 </body>
 </html>
