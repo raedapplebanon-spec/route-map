@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <title>Assistant Map</title>
+  <style>
+    /* Full Screen Map */
+    html, body { height: 100%; margin: 0; padding: 0; font-family: sans-serif; }
+    #map { height: 100%; width: 100%; }
+
+    /* Info Window Styling (Arabic/RTL) */
+    .gm-style-iw { direction: rtl; text-align: right; }
+    .info-box { padding: 5px; max-width: 200px; }
+    .info-title { font-weight: bold; font-size: 14px; margin-bottom: 5px; color: #333; }
+    .info-list { margin: 0; padding-right: 20px; font-size: 13px; }
+    .info-item { margin-bottom: 2px; }
+    .status-badge { font-size: 11px; padding: 2px 6px; border-radius: 4px; color: white; display: inline-block; margin-right: 5px; }
+    .bg-red { background-color: #d32f2f; }
+    .bg-green { background-color: #388e3c; }
+    .bg-gray { background-color: #757575; }
+  </style>
+
+  <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCYaJ4Gjq36mq8swYgjNXOYr5mKZi45niA&libraries=marker,geometry&callback=initMap&loading=async" async defer></script>
+</head>
+<body>
+
+  <div id="map"></div>
+
+  <script>
+    // --- VARIABLES ---
+    let map;
+    let directionsService;
+    let directionsRenderer;
+    let markers = [];
+    let currentRouteData = []; // Raw data from Flutter
+    let endStopLocation = null; // To check arrival
+    let hasTriggeredArrival = false; // To prevent spamming the event
+
+    // --- ICONS ---
+    const ICON_BUS = "https://maps.google.com/mapfiles/kml/shapes/bus.png";
+    const ICON_START = "http://maps.google.com/mapfiles/kml/paddle/go.png";
+    const ICON_END = "http://maps.google.com/mapfiles/kml/paddle/stop.png";
+    
+    // Status Icons (Dynamic Circles)
+    function getPinSvg(color) {
+        return {
+            path: google.maps.SymbolPath.CIRCLE,
+            fillColor: color,
+            fillOpacity: 1,
+            strokeColor: 'white',
+            strokeWeight: 2,
+            scale: 7
+        };
+    }
+
+    // --- 1. INITIALIZE MAP ---
+    window.initMap = async function() {
+        const { Map } = await google.maps.importLibrary("maps");
+        
+        // Default Center (Jordan)
+        map = new Map(document.getElementById("map"), {
+            center: { lat: 32.028, lng: 35.704 },
+            zoom: 12,
+            mapTypeControl: false,
+            streetViewControl: false,
+            fullscreenControl: false
+        });
+
+        directionsService = new google.maps.DirectionsService();
+        directionsRenderer = new google.maps.DirectionsRenderer({
+            map: map,
+            suppressMarkers: true, // We draw our own custom markers
+            preserveViewport: false
+        });
+
+        // Start Tracking Blue Dot (Assistant's Location)
+        startLocationTracking();
+
+        console.log("✅ Assistant Map Loaded");
+    };
+
+    // --- 2. LOCATION TRACKING (Blue Dot + End Stop Logic) ---
+    function startLocationTracking() {
+        if (navigator.geolocation) {
+            
+            // Create Blue Dot Marker
+            const userMarker = new google.maps.Marker({
+                map: map,
+                icon: {
+                    path: google.maps.SymbolPath.CIRCLE,
+                    scale: 6,
+                    fillColor: "#4285F4",
+                    fillOpacity: 1,
+                    strokeColor: "white",
+                    strokeWeight: 2
+                },
+                title: "موقعك الحالي"
+            });
+
+            navigator.geolocation.watchPosition((pos) => {
+                const lat = pos.coords.latitude;
+                const lng = pos.coords.longitude;
+                const myLoc = new google.maps.LatLng(lat, lng);
+                
+                userMarker.setPosition(myLoc);
+
+                // 🔥 CHECK ARRIVAL AT END STOP
+                if (endStopLocation && !hasTriggeredArrival) {
+                    const distance = google.maps.geometry.spherical.computeDistanceBetween(myLoc, endStopLocation);
+                    
+                    // If closer than 50 meters to the End Stop
+                    if (distance < 50) {
+                        hasTriggeredArrival = true;
+                        sendToFlutter({ action: 'arrivedAtEnd' });
+                        // alert("🏁 You reached the destination!"); // Optional debug
+                    }
+                }
+            }, (err) => console.log("Loc Error:", err), {
+                enableHighAccuracy: true
+            });
+        }
+    }
+
+    // --- 3. RECEIVE DATA FROM FLUTTER ---
+    window.addEventListener("message", (event) => {
+        let data = event.data;
+        if (typeof data === 'string') {
+            try { data = JSON.parse(data); } catch(e) {}
+        }
+
+        if (data && data.action === "setDriverRoute") {
+            processRouteData(data.stops);
+        }
+    });
+
+    // --- 4. PROCESS & GROUP STOPS ---
+    function processRouteData(stops) {
+        currentRouteData = stops;
+        clearMap();
+
+        // A. Separate Start, End, and Waypoints
+        let startStop = stops.find(s => s.isStart);
+        let endStop = stops.find(s => s.isEnd);
+        
+        // Filter out start/end from the middle list
+        // Filter out 'isExcluded' (We don't route to them, but we might draw markers later if needed)
+        let middleStops = stops.filter(s => !s.isStart && !s.isEnd && !s.isExcluded);
+
+        // B. Group Stops by Location (Lat/Lng)
+        // Key: "lat,lng" -> Value: [stop1, stop2]
+        let groups = {};
+        
+        middleStops.forEach(s => {
+            const key = `${s.lat.toFixed(5)},${s.lng.toFixed(5)}`;
+            if (!groups[key]) groups[key] = [];
+            groups[key].push(s);
+        });
+
+        // C. Convert Groups to Waypoints for Google
+        let waypoints = [];
+        let groupedMarkersData = [];
+
+        Object.keys(groups).forEach(key => {
+            const group = groups[key];
+            const first = group[0];
+            const loc = { lat: first.lat, lng: first.lng };
+            
+            waypoints.push({
+                location: loc,
+                stopover: true 
+            });
+
+            // Store data to draw marker later
+            groupedMarkersData.push({
+                location: loc,
+                students: group, // List of all students at this spot
+                type: 'student_group'
+            });
+        });
+
+        // Store End Stop Location for Geofencing
+        if (endStop) {
+            endStopLocation = new google.maps.LatLng(endStop.lat, endStop.lng);
+            hasTriggeredArrival = false; // Reset trigger
+        }
+
+        // D. Calculate Route
+        if (startStop && endStop) {
+            calculateRoute(startStop, endStop, waypoints, groupedMarkersData);
+        }
+    }
+
+    // --- 5. CALCULATE ROUTE & ORDER ---
+    function calculateRoute(start, end, waypoints, groupedMarkersData) {
+        const request = {
+            origin: { lat: start.lat, lng: start.lng },
+            destination: { lat: end.lat, lng: end.lng },
+            waypoints: waypoints,
+            optimizeWaypoints: true, // 🔥 GOOGLE OPTIMIZES ORDER HERE
+            travelMode: 'DRIVING'
+        };
+
+        directionsService.route(request, (result, status) => {
+            if (status === 'OK') {
+                directionsRenderer.setDirections(result);
+                
+                // 1. Draw Custom Markers (Since we suppressed default ones)
+                drawMarkers(start, end, groupedMarkersData, result.routes[0].waypoint_order);
+                
+                // 2. Send Ordered IDs back to Flutter
+                sendOrderToFlutter(groupedMarkersData, result.routes[0].waypoint_order, start, end);
+                
+            } else {
+                console.error("Directions request failed due to " + status);
+            }
+        });
+    }
+
+    // --- 6. DRAW MARKERS ---
+    function drawMarkers(start, end, middleGroups, order) {
+        // Draw Start
+        createMarker(start, ICON_START, "Start: " + start.name);
+
+        // Draw End
+        createMarker(end, ICON_END, "End: " + end.name);
+
+        // Draw Middle Markers (Students)
+        // Note: 'order' is an array of indices [2, 0, 1] meaning:
+        // 1st stop on road is middleGroups[2]
+        // 2nd stop on road is middleGroups[0]...
+        
+        middleGroups.forEach(group => {
+            // Determine Color based on Group Status
+            // If ALL picked -> Green. If ANY pending -> Red.
+            const allPicked = group.students.every(s => s.status === 'picked' || s.status === 'dropped');
+            const color = allPicked ? "#388e3c" : "#d32f2f"; // Green : Red
+
+            const marker = new google.maps.Marker({
+                position: group.location,
+                map: map,
+                icon: getPinSvg(color),
+                label: {
+                    text: group.students.length.toString(), // Show count (e.g., "3")
+                    color: "white",
+                    fontSize: "12px",
+                    fontWeight: "bold"
+                }
+            });
+
+            // Info Window Content
+            let content = `<div class="info-box"><div class="info-title">Students (${group.students.length})</div><div class="info-list">`;
+            
+            group.students.forEach(s => {
+                let badgeClass = s.status === 'picked' ? 'bg-green' : (s.status === 'dropped' ? 'bg-blue' : 'bg-red');
+                let statusText = s.status === 'picked' ? 'Picked' : (s.status === 'dropped' ? 'Dropped' : 'Pending');
+                
+                content += `
+                    <div class="info-item">
+                        <span class="status-badge ${badgeClass}">${statusText}</span>
+                        ${s.name}
+                    </div>
+                `;
+            });
+            content += `</div></div>`;
+
+            const infowindow = new google.maps.InfoWindow({ content: content });
+            
+            marker.addListener("click", () => {
+                infowindow.open(map, marker);
+            });
+
+            markers.push(marker);
+        });
+    }
+
+    function createMarker(stop, iconUrl, title) {
+        const m = new google.maps.Marker({
+            position: { lat: stop.lat, lng: stop.lng },
+            map: map,
+            icon: { url: iconUrl, scaledSize: new google.maps.Size(30, 30) },
+            title: title
+        });
+        markers.push(m);
+    }
+
+    function clearMap() {
+        markers.forEach(m => m.setMap(null));
+        markers = [];
+    }
+
+    // --- 7. BRIDGE TO FLUTTER ---
+    function sendOrderToFlutter(groups, orderIndices, start, end) {
+        // Construct the full ordered list of IDs
+        let orderedIds = [];
+        
+        // 1. Start ID
+        orderedIds.push(start.id);
+
+        // 2. Middle IDs (in Google's optimized order)
+        orderIndices.forEach(index => {
+            const group = groups[index];
+            // If a group has multiple students, add all their IDs
+            group.students.forEach(s => orderedIds.push(s.id));
+        });
+
+        // 3. End ID
+        orderedIds.push(end.id);
+
+        sendToFlutter({
+            action: 'routeOrdered',
+            orderedIds: orderedIds
+        });
+    }
+
+    function sendToFlutter(payload) {
+        if (window.FlutterChan) {
+            window.FlutterChan.postMessage(JSON.stringify(payload));
+        } else {
+            window.parent.postMessage(payload, "*");
+        }
+    }
+
+  </script>
+</body>
+</html>
