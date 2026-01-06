@@ -94,6 +94,7 @@
   <div id="legend" class="legend">
     <div class="legend-row"><div class="legend-color" style="background:#00c853"></div><span>البداية (Start)</span></div>
     <div class="legend-row"><div class="legend-color" style="background:#d50000"></div><span>النهاية (End)</span></div>
+    <div class="legend-row"><div class="legend-color" style="background:#9C27B0"></div><span>المرافق (Escort)</span></div>
     <div class="legend-row"><div class="legend-color" style="background:#d32f2f"></div><span>قيد الانتظار (Pending)</span></div>
     <div class="legend-row"><div class="legend-color" style="background:#388e3c"></div><span>مكتمل (Done)</span></div>
     <div class="legend-row"><div class="legend-color" style="background:#757575"></div><span>مستبعد (Excluded)</span></div>
@@ -299,7 +300,7 @@
       
       if (data.action === "setDriverRoute") {
           const stops = data.stops || [];
-          const shift = data.shift || "AM"; // ✅ Read Shift from Flutter
+          const shift = data.shift || "AM"; 
           
           if (mapReady) {
              window.setRouteData(stops, shift);
@@ -309,7 +310,6 @@
       }
     });
 
-    // ✅ UPDATED: Accept Shift Parameter
     window.setRouteData = function(stops, shift) {
       window.routeMarkers.forEach(obj => obj.marker.map = null);
       window.routeMarkers = [];
@@ -318,8 +318,6 @@
       
       const bounds = new google.maps.LatLngBounds();
       const clusters = groupCloseLocations(stops, 15);
-
-      // ✅ Determine if PM Shift
       const isPM = (shift === 'PM');
 
       const addMarker = (cluster, color, text, html) => {
@@ -355,10 +353,6 @@
           const pos = { lat: cluster.lat, lng: cluster.lng };
           bounds.extend(pos);
 
-          if (cluster.stopType === 'assistant') {
-              return; 
-          }
-
           let color = "#1a73e8"; 
           let text = cluster.items.length.toString();
           let header = "نقطة تجمع";
@@ -369,6 +363,9 @@
              color = "#d50000"; text = "E"; header = "نقطة النهاية";
              endStopLocation = pos;
              hasTriggeredArrival = false;
+          } else if (cluster.stopType === 'assistant') {
+             // ✅ RESTORED: Show Assistant Marker as Purple
+             color = "#9C27B0"; text = "A"; header = "المرافق";
           } else if (cluster.isExcluded) {
              color = "#757575"; 
           } else {
@@ -380,20 +377,25 @@
              }
           }
 
+          // Build Info Window
           let rows = cluster.items.map(s => {
+              // ✅ SPECIAL CASE: Assistants get NO status badge
+              if (s.type === 'assistant') {
+                  return `<div style="margin-bottom:6px; border-bottom:1px solid #eee; padding-bottom:4px;">
+                            <b>${s.name || 'مرافق'}</b>
+                          </div>`;
+              }
+
+              // Normal Student Logic
               let badgeColor = 'bg-red';
-              // ✅ CORRECT ARABIC STATUS TEXT BASED ON SHIFT
               let statusTxt = isPM ? 'لم يتم التنزيل' : 'لم يتم التحميل'; 
 
               if (s.status === 'picked') { 
-                  badgeColor = 'bg-green'; 
-                  statusTxt = 'تم التحميل'; 
+                  badgeColor = 'bg-green'; statusTxt = 'تم التحميل'; 
               } else if (s.status === 'dropped') { 
-                  badgeColor = 'bg-green'; 
-                  statusTxt = 'تم التنزيل'; 
+                  badgeColor = 'bg-green'; statusTxt = 'تم التنزيل'; 
               } else if (s.isExcluded) { 
-                  badgeColor = 'bg-gray'; 
-                  statusTxt = 'مستبعد'; 
+                  badgeColor = 'bg-gray'; statusTxt = 'مستبعد'; 
               }
 
               return `<div style="margin-bottom:6px; border-bottom:1px solid #eee; padding-bottom:4px;">
