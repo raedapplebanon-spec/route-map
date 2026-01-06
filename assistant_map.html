@@ -120,13 +120,12 @@
     let hasTriggeredArrival = false;
     let userLocationMarker = null;
 
-    // 🔥 NEW FLAG: Tracks if we have locked onto the bus yet
     let isBusTrackingActive = false;
 
+    // 🔥 CONFIG: 2000 meters ≈ 3 minutes driving at 40km/h
+    const APPROACH_RADIUS = 2000; 
+
     const MY_MAP_ID = "48c2bb983bd19c1c44d95cb7";
-    
-    // 🔥 🔥 🔥 NEW: URL for the PNG Icon 🔥 🔥 🔥
-    // If you want to use your own image, upload it to your server and replace this URL.
     const BUS_ICON_URL = "https://raedapplebanon-spec.github.io/route-map/school-bus_6122028.png"; 
 
     // --- 1. HELPER: Calculate Distance (Haversine) ---
@@ -262,7 +261,7 @@
       }
     };
 
-    // --- 5. LOCATION TRACKING (Smart Bus & Follow) ---
+    // --- 5. LOCATION TRACKING (Smart Bus & Approaches) ---
     function startLocationTracking() {
         if (!navigator.geolocation) return;
 
@@ -270,35 +269,60 @@
             const lat = pos.coords.latitude;
             const lng = pos.coords.longitude;
             const myLoc = { lat, lng };
+            const myLocObj = new google.maps.LatLng(lat, lng);
 
-            // 🔥 1. CREATE BUS ICON (Using the new URL)
+            // 1. Update Bus Icon
             if (!userLocationMarker) {
                 userLocationMarker = new google.maps.Marker({
                     map: map,
                     position: myLoc,
                     icon: {
-                        url: BUS_ICON_URL, // 🔥 Use the URL here
-                        scaledSize: new google.maps.Size(40, 40), // 🔥 Scale it down to a good size
-                        anchor: new google.maps.Point(20, 20) // Center the anchor
+                        url: BUS_ICON_URL, 
+                        scaledSize: new google.maps.Size(40, 40), 
+                        anchor: new google.maps.Point(20, 20) 
                     },
                     title: "حافلة المدرسة",
                     zIndex: 999
                 });
-                
-                // 🔥 First time Bus is found: Zoom In & Lock Track
                 map.setZoom(17);
                 isBusTrackingActive = true; 
             } else {
                 userLocationMarker.setPosition(myLoc);
             }
 
-            // 🔥 2. AUTO-FOLLOW (Pan Camera)
-            // Always keep bus in center
+            // 2. Pan Camera
             map.panTo(myLoc); 
-            // Also enforce tracking flag
             isBusTrackingActive = true;
 
-            // 🔥 3. ARRIVAL LOGIC (AM/PM)
+            // 🔥 3. CHECK APPROACHING STOPS (The "3 min" Alert)
+            // We loop through ALL active route markers
+            if (window.routeMarkers.length > 0) {
+                window.routeMarkers.forEach(stop => {
+                    // Skip if already triggered OR if it's the Start Point (no need to alert start)
+                    // You can also add '&& !stop.isEnd' if you don't want alerts for school
+                    if (stop.hasTriggeredApproach || stop.isStart) return;
+
+                    const stopLoc = new google.maps.LatLng(stop.lat, stop.lng);
+                    const distToStop = google.maps.geometry.spherical.computeDistanceBetween(myLocObj, stopLoc);
+
+                    // 2000 meters ≈ 3 minutes
+                    if (distToStop < APPROACH_RADIUS) {
+                        stop.hasTriggeredApproach = true; // Lock it so we don't spam
+                        
+                        // Send action to Flutter
+                        // We send the list of student IDs at this stop
+                        const ids = stop.items.map(i => i.id);
+                        sendToFlutter({ 
+                            action: 'stopApproaching', 
+                            stopIds: ids,
+                            stopName: stop.names[0] || "Stop" 
+                        });
+                        console.log("🔔 Approaching stop: " + stop.names[0]);
+                    }
+                });
+            }
+
+            // 4. CHECK FINAL ARRIVAL (End Trip Logic)
             if (!hasTriggeredArrival) {
                 let targetLoc = null;
                 let triggerRadius = 50; 
@@ -320,8 +344,7 @@
 
                 if (targetLoc) {
                     const t = new google.maps.LatLng(targetLoc.lat, targetLoc.lng);
-                    const c = new google.maps.LatLng(lat, lng);
-                    const dist = google.maps.geometry.spherical.computeDistanceBetween(c, t);
+                    const dist = google.maps.geometry.spherical.computeDistanceBetween(myLocObj, t);
                     
                     if (dist < triggerRadius) {
                         hasTriggeredArrival = true;
@@ -384,14 +407,21 @@
              infoWindow.setContent(html);
              infoWindow.open(map, marker);
              if(cluster.items.length > 0) {
-                 sendToFlutter({ action: 'stopClicked', id: cluster.items[0].id });
+                 // sendToFlutter({ action: 'stopClicked', id: cluster.items[0].id });
              }
          });
          
          window.routeMarkers.push({
              marker, pin,
              names: cluster.items.map(i => i.name || ""),
-             html, lat: cluster.lat, lng: cluster.lng
+             html, 
+             lat: cluster.lat, 
+             lng: cluster.lng,
+             // 🔥 NEW: Save stop metadata for approach checks
+             isStart: cluster.isStart,
+             isEnd: cluster.isEnd,
+             items: cluster.items, // contains IDs
+             hasTriggeredApproach: false // Reset trigger
          });
       };
 
@@ -454,9 +484,6 @@
       });
 
       if (clusters.length >= 2) calculateRoadRoute(clusters);
-
-      // 🔥 FIX: CAMERA JUMP ISSUE
-      // Only fit bounds if we are NOT currently tracking the bus
       if (!isBusTrackingActive && !bounds.isEmpty()) {
           map.fitBounds(bounds);
       }
