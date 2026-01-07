@@ -223,11 +223,10 @@
             map.panTo(myLoc); 
             isBusTrackingActive = true;
 
-            // 🔥 3. SMART LOOK-AHEAD RADAR (STRICT STUDENT FILTER)
+            // 🔥 3. SMART LOOK-AHEAD RADAR
             if (window.orderedStopIds && window.orderedStopIds.length > 0) {
                 let firstPendingIndex = -1;
                 
-                // A. Find the Cursor (First Pending Student)
                 for (let i = 0; i < window.orderedStopIds.length; i++) {
                     const id = window.orderedStopIds[i];
                     const markerObj = window.routeMarkers.find(m => m.items.some(item => item.id === id));
@@ -244,7 +243,6 @@
                     }
                 }
 
-                // B. Scan the next 3 stops starting from Cursor
                 if (firstPendingIndex !== -1) {
                     const lookAheadCount = 3; 
                     let batchIds = [];
@@ -254,9 +252,6 @@
                         if (targetIndex >= window.orderedStopIds.length) break;
                         const targetId = window.orderedStopIds[targetIndex];
                         const targetMarker = window.routeMarkers.find(m => m.items.some(item => item.id === targetId));
-                        
-                        // Ensure we don't accidentally target an Assistant or Driver
-                        // NOTE: The strict filter below handles it, but good to check marker type if needed.
                         
                         if (targetMarker && !targetMarker.hasTriggeredApproach) {
                             const stopLoc = new google.maps.LatLng(targetMarker.lat, targetMarker.lng);
@@ -358,26 +353,41 @@
          });
       };
 
-      // 🔥 Initial Render
-      clusters.forEach((cluster, index) => {
+      // 🔥 CORRECTED: Logic to ensure Excluded stops don't take a number.
+      let validStopCounter = 0; 
+
+      clusters.forEach((cluster) => {
           const pos = { lat: cluster.lat, lng: cluster.lng };
           bounds.extend(pos);
+          
           let color = "#1a73e8"; 
-          let text = (index + 1).toString(); 
+          let text = ""; // Default to empty
           let header = "نقطة تجمع";
 
-          if (cluster.isStart) { color = "#00c853"; text = "S"; header = "نقطة البداية"; }
-          else if (cluster.isEnd) { color = "#d50000"; text = "E"; header = "نقطة النهاية"; endStopLocation = pos; }
-          else if (cluster.stopType === 'assistant') { color = "#9C27B0"; text = "A"; header = "المرافق"; }
-          else if (cluster.isExcluded) { color = "#757575"; } 
+          if (cluster.isExcluded) { 
+              color = "#757575"; 
+              text = "X"; // Visually show it's excluded
+          }
+          else if (cluster.isStart) { 
+              color = "#00c853"; text = "S"; header = "نقطة البداية"; 
+          }
+          else if (cluster.isEnd) { 
+              color = "#d50000"; text = "E"; header = "نقطة النهاية"; endStopLocation = pos; 
+          }
+          else if (cluster.stopType === 'assistant') { 
+              color = "#9C27B0"; text = "A"; header = "المرافق"; 
+          }
           else {
-             // 🔥 Color Logic: Only Pending Students make it Red.
+             // Valid Student Stop
+             validStopCounter++; // Only increment for valid stops!
+             text = validStopCounter.toString();
+
+             // 🔥 Color Logic: Any Pending? Red.
              const activeStudents = cluster.items.filter(s => s.type === 'student' && !s.isExcluded);
              const anyPending = activeStudents.some(s => s.status === 'pending');
-             
-             // If there are students and any are pending -> Red. Otherwise -> Green.
-             if (activeStudents.length > 0 && anyPending) color = "#d32f2f"; else color = "#388e3c"; 
+             if (anyPending) color = "#d32f2f"; else color = "#388e3c"; 
           }
+
           let rows = cluster.items.map(s => {
               if (s.type === 'assistant') return `<div style="margin-bottom:6px; border-bottom:1px solid #eee; padding-bottom:4px;"><b>${s.name || 'مرافق'}</b></div>`;
               let badgeColor = 'bg-red'; let statusTxt = isPM ? 'لم يتم التنزيل' : 'لم يتم التحميل'; 
@@ -386,6 +396,7 @@
               else if (s.isExcluded) { badgeColor = 'bg-gray'; statusTxt = 'مستبعد'; }
               return `<div style="margin-bottom:6px; border-bottom:1px solid #eee; padding-bottom:4px;"><span class="status-badge ${badgeColor}">${statusTxt}</span><b>${s.name || 'طالب'}</b><br><span style="font-size:12px; color:#555;">${s.grade || ''}</span></div>`;
           }).join('');
+          
           let html = `<div style="color:black;text-align:right;direction:rtl;min-width:180px;"><b style="color:${color}; font-size:14px;">${header}</b><hr>${rows}</div>`;
           addMarker(cluster, color, text, html);
       });
