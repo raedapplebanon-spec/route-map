@@ -48,9 +48,17 @@
     let map, directionsService, directionsRenderer, infoWindow;
     let mapReady = false;
     let currentShift = "AM"; 
+    
+    // 🔥 NEW: Route Type Flag (first_morning, midday, last_evening)
+    let currentRouteType = "first_morning"; 
+
+    let startStopLocation = null; // Needed for "Leaving Zone" check
     let endStopLocation = null; 
     let pmLastStudentLocation = null; 
+    
     let hasTriggeredArrival = false;
+    let hasLeftStartZone = false; // Latch for Midday routes
+
     let userLocationMarker = null;
     let radarCircle = null;
     let isBusTrackingActive = false;
@@ -173,7 +181,7 @@
         console.log("✅ Assistant Map Initialized");
 
         if (window.pendingData) {
-            window.setRouteData(window.pendingData.stops, window.pendingData.shift);
+            window.setRouteData(window.pendingData.stops, window.pendingData.shift, window.pendingData.routeType);
             window.pendingData = null;
         }
       } catch (e) {
@@ -223,7 +231,9 @@
             map.panTo(myLoc); 
             isBusTrackingActive = true;
 
-            // 🔥 3. SMART LOOK-AHEAD RADAR
+            // ---------------------------------------------
+            // 🔥 3. SMART LOOK-AHEAD RADAR (STRICT FILTER)
+            // ---------------------------------------------
             if (window.orderedStopIds && window.orderedStopIds.length > 0) {
                 let firstPendingIndex = -1;
                 
@@ -232,13 +242,11 @@
                     const markerObj = window.routeMarkers.find(m => m.items.some(item => item.id === id));
                     
                     if (markerObj) {
-                        // STRICT Logic: Only type 'student' who is 'pending' and not excluded
                         const isPending = markerObj.items.some(s => 
                             s.type === 'student' && 
                             s.status === 'pending' && 
                             !s.isExcluded
                         );
-
                         if (isPending) { firstPendingIndex = i; break; }
                     }
                 }
@@ -258,15 +266,10 @@
                             const distToStop = google.maps.geometry.spherical.computeDistanceBetween(myLocObj, stopLoc);
                             
                             if (distToStop < APPROACH_RADIUS) {
-                                targetMarker.hasTriggeredApproach = true; // Lock it 🔒
-                                
-                                // 🔥 FILTER: Only get Pending, Active Students
+                                targetMarker.hasTriggeredApproach = true;
                                 const activeStudents = targetMarker.items.filter(s => 
-                                    s.type === 'student' && 
-                                    s.status === 'pending' && 
-                                    !s.isExcluded
+                                    s.type === 'student' && s.status === 'pending' && !s.isExcluded
                                 );
-                                
                                 if (activeStudents.length > 0) {
                                     batchIds.push(...activeStudents.map(i => i.id));
                                     const namesAtThisStop = activeStudents.map(s => s.name).join(" & ");
@@ -284,24 +287,79 @@
                 }
             }
 
+            // ---------------------------------------------
+            // 🔥 4. CHECK FINAL ARRIVAL (NEW LOGIC)
+            // ---------------------------------------------
+            
+            // Step A: Handle "Leaving Zone" Latch for Midday
+            if (currentRouteType === 'midday' && !hasLeftStartZone && startStopLocation) {
+                const startLocObj = new google.maps.LatLng(startStopLocation.lat, startStopLocation.lng);
+                const distFromStart = google.maps.geometry.spherical.computeDistanceBetween(myLocObj, startLocObj);
+                
+                if (distFromStart > 500) { // Must drive 500m away to arm the system
+                    hasLeftStartZone = true;
+                    console.log("🔓 Bus has left the school zone. Arrival detection armed.");
+                }
+            }
+
+            // Step B: Check Arrival
             if (!hasTriggeredArrival) {
                 let targetLoc = null;
                 let triggerRadius = 50; 
-                if (currentShift === 'AM') {
-                    if (endStopLocation) { targetLoc = endStopLocation; triggerRadius = 300; }
-                } else {
-                    if (pmLastStudentLocation) { targetLoc = pmLastStudentLocation; triggerRadius = 100; }
-                    else if (endStopLocation) { targetLoc = endStopLocation; triggerRadius = 100; }
+                let canTrigger = true;
+
+                // 1. FIRST MORNING (Home -> School)
+                if (currentRouteType === 'first_morning') {
+                    if (endStopLocation) {
+                        targetLoc = endStopLocation; // School
+                        triggerRadius = 300; 
+                    }
                 }
-                if (targetLoc) {
+                
+                // 2. MIDDAY (School -> School)
+                else if (currentRouteType === 'midday') {
+                    if (endStopLocation) {
+                        targetLoc = endStopLocation; // School
+                        triggerRadius = 300;
+                        // 🔒 Safety Latch: Must have left first!
+                        if (!hasLeftStartZone) canTrigger = false; 
+                    }
+                }
+                
+                // 3. LAST EVENING (School -> Home)
+                else if (currentRouteType === 'last_evening') {
+                    if (pmLastStudentLocation) {
+                        targetLoc = pmLastStudentLocation; // Last Kid
+                        triggerRadius = 100; // Strict
+                    } else if (endStopLocation) {
+                        // Fallback if no students
+                        targetLoc = endStopLocation; 
+                        triggerRadius = 100;
+                    }
+                }
+                
+                // 4. GENERIC FALLBACK (If flag is missing or AM/PM used)
+                else {
+                    if (currentShift === 'AM') {
+                         if (endStopLocation) { targetLoc = endStopLocation; triggerRadius = 300; }
+                    } else {
+                         if (pmLastStudentLocation) { targetLoc = pmLastStudentLocation; triggerRadius = 100; }
+                         else if (endStopLocation) { targetLoc = endStopLocation; triggerRadius = 100; }
+                    }
+                }
+
+                // Execute Check
+                if (targetLoc && canTrigger) {
                     const t = new google.maps.LatLng(targetLoc.lat, targetLoc.lng);
                     const dist = google.maps.geometry.spherical.computeDistanceBetween(myLocObj, t);
+                    
                     if (dist < triggerRadius) {
                         hasTriggeredArrival = true;
                         sendToFlutter({ action: 'arrivedAtEnd' });
                     }
                 }
             }
+
         }, (err) => {
             console.warn(`⚠️ GPS Error (${err.code}): ${err.message}`);
             if (err.code === 2 || err.code === 3) {
@@ -318,19 +376,27 @@
       if (data.action === "setDriverRoute") {
           const stops = data.stops || [];
           const shift = data.shift || "AM"; 
-          if (mapReady) window.setRouteData(stops, shift);
-          else window.pendingData = { stops: stops, shift: shift };
+          // 🔥 NEW: Receive routeType
+          const routeType = data.routeType || "first_morning"; 
+          
+          if (mapReady) window.setRouteData(stops, shift, routeType);
+          else window.pendingData = { stops: stops, shift: shift, routeType: routeType };
       }
     });
 
-    window.setRouteData = function(stops, shift) {
+    // 🔥 NEW PARAMETER: routeType
+    window.setRouteData = function(stops, shift, routeType) {
       const alertedStudentIds = new Set();
       if (window.routeMarkers) {
           window.routeMarkers.forEach(m => {
               if (m.hasTriggeredApproach) m.items.forEach(s => alertedStudentIds.add(s.id));
           });
       }
+      
       currentShift = shift; 
+      currentRouteType = routeType; // Store it globally
+      console.log("🚦 Route Type Set To:", currentRouteType);
+
       window.routeMarkers.forEach(obj => obj.marker.map = null);
       window.routeMarkers = [];
       directionsRenderer.setDirections({ routes: [] });
@@ -338,9 +404,13 @@
       const bounds = new google.maps.LatLngBounds();
       const clusters = groupCloseLocations(stops, 15);
       const isPM = (currentShift === 'PM');
+      
+      // Reset Arrival Logic
+      startStopLocation = null;
       endStopLocation = null;
       pmLastStudentLocation = null;
       hasTriggeredArrival = false; 
+      hasLeftStartZone = false; 
 
       const addMarker = (cluster, color, text, html) => {
          const pin = new google.maps.marker.PinElement({ background: color, borderColor: "#FFFFFF", glyphColor: "#FFFFFF", glyphText: text });
@@ -353,7 +423,6 @@
          });
       };
 
-      // 🔥 CORRECTED: Logic to ensure Excluded stops don't take a number.
       let validStopCounter = 0; 
 
       clusters.forEach((cluster) => {
@@ -361,31 +430,30 @@
           bounds.extend(pos);
           
           let color = "#1a73e8"; 
-          let text = ""; // Default to empty
+          let text = ""; 
           let header = "نقطة تجمع";
 
           if (cluster.isExcluded) { 
               color = "#757575"; 
-              text = "X"; // Visually show it's excluded
+              text = "X"; 
           }
           else if (cluster.isStart) { 
               color = "#00c853"; text = "S"; header = "نقطة البداية"; 
+              startStopLocation = pos; // Save Start for Midday check
           }
           else if (cluster.isEnd) { 
-              color = "#d50000"; text = "E"; header = "نقطة النهاية"; endStopLocation = pos; 
+              color = "#d50000"; text = "E"; header = "نقطة النهاية"; 
+              endStopLocation = pos; 
           }
           else if (cluster.stopType === 'assistant') { 
               color = "#9C27B0"; text = "A"; header = "المرافق"; 
           }
           else {
-             // Valid Student Stop
-             validStopCounter++; // Only increment for valid stops!
+             validStopCounter++; 
              text = validStopCounter.toString();
-
-             // 🔥 Color Logic: Any Pending? Red.
              const activeStudents = cluster.items.filter(s => s.type === 'student' && !s.isExcluded);
              const anyPending = activeStudents.some(s => s.status === 'pending');
-             if (anyPending) color = "#d32f2f"; else color = "#388e3c"; 
+             if (activeStudents.length > 0 && anyPending) color = "#d32f2f"; else color = "#388e3c"; 
           }
 
           let rows = cluster.items.map(s => {
