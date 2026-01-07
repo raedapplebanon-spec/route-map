@@ -223,7 +223,7 @@
             map.panTo(myLoc); 
             isBusTrackingActive = true;
 
-            // 🔥 3. SMART LOOK-AHEAD RADAR (Corrected Logic)
+            // 🔥 3. SMART LOOK-AHEAD RADAR (SIMPLIFIED & UNIFIED)
             if (window.orderedStopIds && window.orderedStopIds.length > 0) {
                 let firstPendingIndex = -1;
                 
@@ -232,21 +232,12 @@
                     const markerObj = window.routeMarkers.find(m => m.items.some(item => item.id === id));
                     
                     if (markerObj) {
-                        const isPending = markerObj.items.some(s => {
-                            // 1. Always skip these:
-                            if (s.isExcluded || s.isStart || s.type === 'assistant') return false;
-
-                            // 2. Logic based on Shift:
-                            if (currentShift === 'AM') {
-                                // AM: Alert if student is 'pending' (Waiting on street)
-                                // If 'picked', they are on bus -> Done.
-                                return s.status === 'pending';
-                            } else {
-                                // PM: Alert if student is 'pending' or 'picked' (Waiting on bus)
-                                // Only stop alerting when they are 'dropped' (At home).
-                                return s.status !== 'dropped';
-                            }
-                        });
+                        const isPending = markerObj.items.some(s => 
+                            // 1. Basic Filters (Skip Assistant, Start, Excluded)
+                            !s.isExcluded && !s.isStart && s.type !== 'assistant' &&
+                            // 2. Universal Status Check (Works for AM & PM based on your logic)
+                            s.status === 'pending'
+                        );
 
                         if (isPending) { firstPendingIndex = i; break; }
                     }
@@ -267,7 +258,10 @@
                             const distToStop = google.maps.geometry.spherical.computeDistanceBetween(myLocObj, stopLoc);
                             if (distToStop < APPROACH_RADIUS) {
                                 targetMarker.hasTriggeredApproach = true;
-                                const activeStudents = targetMarker.items.filter(s => !s.isExcluded);
+                                
+                                // Only get Pending, Active Students
+                                const activeStudents = targetMarker.items.filter(s => !s.isExcluded && s.status === 'pending');
+                                
                                 if (activeStudents.length > 0) {
                                     batchIds.push(...activeStudents.map(i => i.id));
                                     const namesAtThisStop = activeStudents.map(s => s.name).join(" & ");
@@ -354,13 +348,10 @@
          });
       };
 
-      // 🔥 UPDATED LOOP: Use 'index' to set the Pin Text to "1, 2, 3"
       clusters.forEach((cluster, index) => {
           const pos = { lat: cluster.lat, lng: cluster.lng };
           bounds.extend(pos);
           let color = "#1a73e8"; 
-          
-          // 🔥 CHANGED: Shows Order Number (index + 1)
           let text = (index + 1).toString(); 
           let header = "نقطة تجمع";
 
@@ -416,7 +407,6 @@
                    const cluster = [...assistants, ...students][idx];
                    cluster.items.forEach(item => orderedIds.push(item.id));
                    
-                   // 🔥 RE-UPDATE MARKER TEXT to match Optimized Order
                    const markerObj = window.routeMarkers.find(m => 
                        Math.abs(m.lat - cluster.lat) < 0.00001 && 
                        Math.abs(m.lng - cluster.lng) < 0.00001
