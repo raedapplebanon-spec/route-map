@@ -312,12 +312,12 @@
             map.panTo(myLoc); 
             isBusTrackingActive = true;
 
-            // 🔥 3. SMART LOOK-AHEAD RADAR (Next 3 Stops)
+            // 🔥 3. SMART LOOK-AHEAD RADAR (Aggregated Mode)
             if (window.orderedStopIds && window.orderedStopIds.length > 0) {
                 
-                // A. Find the Index of the FIRST pending stop
                 let firstPendingIndex = -1;
                 
+                // A. Find the Index of the FIRST pending stop
                 for (let i = 0; i < window.orderedStopIds.length; i++) {
                     const id = window.orderedStopIds[i];
                     const markerObj = window.routeMarkers.find(m => m.items.some(item => item.id === id));
@@ -331,7 +331,7 @@
                         );
                         if (isPending) {
                             firstPendingIndex = i;
-                            break; // Found the start of the line
+                            break; 
                         }
                     }
                 }
@@ -340,6 +340,10 @@
                 if (firstPendingIndex !== -1) {
                     const lookAheadCount = 3; 
                     
+                    // 📦 Create empty buckets to collect everyone we find
+                    let batchIds = [];
+                    let batchNames = [];
+
                     for (let k = 0; k < lookAheadCount; k++) {
                         const targetIndex = firstPendingIndex + k;
                         
@@ -348,27 +352,33 @@
                         const targetId = window.orderedStopIds[targetIndex];
                         const targetMarker = window.routeMarkers.find(m => m.items.some(item => item.id === targetId));
 
-                        // Check distance
                         if (targetMarker && !targetMarker.hasTriggeredApproach) {
                             const stopLoc = new google.maps.LatLng(targetMarker.lat, targetMarker.lng);
                             const distToStop = google.maps.geometry.spherical.computeDistanceBetween(myLocObj, stopLoc);
 
                             if (distToStop < APPROACH_RADIUS) {
-                                targetMarker.hasTriggeredApproach = true; 
+                                targetMarker.hasTriggeredApproach = true; // Lock it 🔒
                                 
-                                const ids = targetMarker.items.map(i => i.id);
-                                sendToFlutter({ 
-                                    action: 'stopApproaching', 
-                                    stopIds: ids, 
-                                    stopName: targetMarker.names[0] || "Stop" 
-                                });
-                                console.log("🔔 Radar Alert: " + targetMarker.names[0]);
+                                // 📥 COLLECT (Don't send yet)
+                                batchIds.push(...targetMarker.items.map(i => i.id));
+                                batchNames.push(targetMarker.names[0]);
+                                
+                                console.log("➕ Adding to batch: " + targetMarker.names[0]);
                             }
                         }
                     }
+
+                    // 🚀 C. SEND ONE MESSAGE (If we found anyone)
+                    if (batchIds.length > 0) {
+                        console.log("📤 Sending Batch Alert for " + batchIds.length + " students.");
+                        sendToFlutter({ 
+                            action: 'stopApproaching', 
+                            stopIds: batchIds, // <--- Contains ALL IDs (Ahmed, Salma, etc.)
+                            stopName: batchNames.join(" + ") // "Ahmed + Salma"
+                        });
+                    }
                 }
             }
-
             // 4. CHECK FINAL ARRIVAL (End Trip)
             if (!hasTriggeredArrival) {
                 let targetLoc = null;
@@ -623,45 +633,7 @@
         }
     }
 
-    // 🔥 FOR TESTING ONLY: Force the bus to jump to a specific stop
-    window.forceJumpToStop = function(stopIndex) {
-        if (!window.orderedStopIds || !window.routeMarkers) return;
-        
-        // 1. Get the target stop
-        const targetId = window.orderedStopIds[stopIndex];
-        const targetMarker = window.routeMarkers.find(m => m.items.some(item => item.id === targetId));
-        
-        if (targetMarker) {
-            console.log(`🚀 Jumping bus to 1.9km away from: ${targetMarker.names[0]}`);
-            
-            // 2. Create a fake coordinate slightly offset (approx 1.9km away)
-            // 0.018 degrees lat is roughly 2km
-            const fakeLat = targetMarker.lat - 0.01; 
-            const fakeLng = targetMarker.lng - 0.01;
-
-            // 3. Manually run the logic (Simulate a GPS update)
-            // We re-use the exact code logic here to prove it works
-            const myLocObj = new google.maps.LatLng(fakeLat, fakeLng);
-            const stopLoc = new google.maps.LatLng(targetMarker.lat, targetMarker.lng);
-            const dist = google.maps.geometry.spherical.computeDistanceBetween(myLocObj, stopLoc);
-            
-            console.log(`📏 Calculated Distance: ${Math.round(dist)} meters`);
-
-            if (dist < 2000) {
-                 const ids = targetMarker.items.map(i => i.id);
-                 // Send the alert!
-                 sendToFlutter({ 
-                    action: 'stopApproaching', 
-                    stopIds: ids, 
-                    stopName: targetMarker.names[0] || "Stop" 
-                });
-                console.log(`✅ SUCCESS! Triggered alert for ${targetMarker.names[0]}`);
-            } else {
-                console.log("❌ Too far away to trigger.");
-            }
-        }
-    };
-
+    
   </script>
 </body>
 </html>
