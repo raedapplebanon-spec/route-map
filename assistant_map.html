@@ -247,7 +247,7 @@
                     fillOpacity: 0.15, // Light blue transparent fill
                     map: map,
                     center: myLoc,
-                    radius: APPROACH_RADIUS // 2000 meters
+                    radius: APPROACH_RADIUS 
                 });
 
                 map.setZoom(14); // Zoom out a bit to see the circle
@@ -347,7 +347,7 @@
                 if (currentShift === 'AM') {
                     if (endStopLocation) {
                         targetLoc = endStopLocation;
-                        triggerRadius = 1000;
+                        triggerRadius = 300;
                     }
                 } else {
                     if (pmLastStudentLocation) {
