@@ -312,12 +312,12 @@
             map.panTo(myLoc); 
             isBusTrackingActive = true;
 
-            // 🔥 3. SMART LOOK-AHEAD RADAR (Aggregated Mode)
+            // 🔥 3. SMART LOOK-AHEAD RADAR (Fixed: Skips Assistant)
             if (window.orderedStopIds && window.orderedStopIds.length > 0) {
                 
                 let firstPendingIndex = -1;
                 
-                // A. Find the Index of the FIRST pending stop
+                // A. Find the Index of the FIRST pending stop (SKIPPING ASSISTANT)
                 for (let i = 0; i < window.orderedStopIds.length; i++) {
                     const id = window.orderedStopIds[i];
                     const markerObj = window.routeMarkers.find(m => m.items.some(item => item.id === id));
@@ -327,7 +327,8 @@
                             s.status !== 'picked' && 
                             s.status !== 'dropped' && 
                             !s.isExcluded &&
-                            !s.isStart
+                            !s.isStart &&
+                            s.type !== 'assistant' // 🛑 CRITICAL FIX: Ignore Assistant!
                         );
                         if (isPending) {
                             firstPendingIndex = i;
@@ -336,11 +337,10 @@
                     }
                 }
 
-                // B. If we have a queue, Check the NEXT 3 stops (The Window)
+                // B. If we have a queue, Check the NEXT 3 stops
                 if (firstPendingIndex !== -1) {
                     const lookAheadCount = 3; 
                     
-                    // 📦 Create empty buckets to collect everyone we find
                     let batchIds = [];
                     let batchNames = [];
 
@@ -352,14 +352,16 @@
                         const targetId = window.orderedStopIds[targetIndex];
                         const targetMarker = window.routeMarkers.find(m => m.items.some(item => item.id === targetId));
 
-                        if (targetMarker && !targetMarker.hasTriggeredApproach) {
+                        // Double check we don't alert for the assistant if they happened to fall into the window
+                        const isTargetAssistant = targetMarker.items.some(s => s.type === 'assistant');
+
+                        if (targetMarker && !targetMarker.hasTriggeredApproach && !isTargetAssistant) {
                             const stopLoc = new google.maps.LatLng(targetMarker.lat, targetMarker.lng);
                             const distToStop = google.maps.geometry.spherical.computeDistanceBetween(myLocObj, stopLoc);
 
                             if (distToStop < APPROACH_RADIUS) {
-                                targetMarker.hasTriggeredApproach = true; // Lock it 🔒
+                                targetMarker.hasTriggeredApproach = true; 
                                 
-                                // 📥 COLLECT (Don't send yet)
                                 batchIds.push(...targetMarker.items.map(i => i.id));
                                 batchNames.push(targetMarker.names[0]);
                                 
@@ -368,13 +370,13 @@
                         }
                     }
 
-                    // 🚀 C. SEND ONE MESSAGE (If we found anyone)
+                    // C. SEND ONE MESSAGE
                     if (batchIds.length > 0) {
-                        console.log("📤 Sending Batch Alert for " + batchIds.length + " students.");
+                        console.log("📤 Sending Batch Alert");
                         sendToFlutter({ 
                             action: 'stopApproaching', 
-                            stopIds: batchIds, // <--- Contains ALL IDs (Ahmed, Salma, etc.)
-                            stopName: batchNames.join(" + ") // "Ahmed + Salma"
+                            stopIds: batchIds, 
+                            stopName: batchNames.join(" + ") 
                         });
                     }
                 }
