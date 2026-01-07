@@ -5,79 +5,14 @@
   <title>Assistant Route Map</title>
   
   <style>
-    /* 1. Basic Setup */
-    html, body { 
-      height: 100%; 
-      margin: 0; 
-      padding: 0; 
-      overflow: hidden; 
-      font-family: 'Segoe UI', Tahoma, sans-serif; 
-    }
-    
-    #map { 
-      height: 100%; 
-      width: 100%; 
-    }
-
-    /* 2. Search Bar Styling */
-    #pac-input {
-      display: none;
-      background-color: #fff;
-      font-family: 'Segoe UI', Tahoma, sans-serif;
-      font-size: 15px;
-      font-weight: 400;
-      margin: 10px;
-      padding: 0 13px;
-      width: 300px;
-      height: 40px;
-      border: 1px solid #dadce0;
-      border-radius: 8px;
-      box-shadow: 0 2px 6px rgba(0,0,0,0.3);
-      outline: none;
-    }
-
-    /* 3. Route Summary Box */
-    .route-summary {
-      display: none;
-      background: white; 
-      padding: 14px 18px;
-      border-radius: 12px; 
-      box-shadow: 0 4px 15px rgba(0,0,0,0.2);
-      font-size: 14px; 
-      line-height: 1.5;
-      direction: rtl; 
-      text-align: right; 
-      min-width: 160px; 
-      border: 1px solid #eee;
-      margin-left: 10px;
-      margin-bottom: 25px;
-    }
-    
-    .route-summary h3 {
-      color: #1a73e8; 
-      border-bottom: 1px solid #eee;
-      padding-bottom: 5px; 
-      margin: 0 0 8px 0;
-      font-size: 15px;
-    }
-
-    /* 4. Legend Styling */
-    .legend {
-      display: none;
-      background: rgba(255, 255, 255, 0.95);
-      padding: 10px 14px;
-      border-radius: 8px;
-      font-size: 12px;
-      box-shadow: 0 2px 6px rgba(0,0,0,0.25);
-      margin-bottom: 25px; 
-      margin-right: 10px;
-      min-width: 140px;
-    }
-    
+    html, body { height: 100%; margin: 0; padding: 0; overflow: hidden; font-family: 'Segoe UI', Tahoma, sans-serif; }
+    #map { height: 100%; width: 100%; }
+    #pac-input { display: none; background-color: #fff; font-family: 'Segoe UI', Tahoma, sans-serif; font-size: 15px; font-weight: 400; margin: 10px; padding: 0 13px; width: 300px; height: 40px; border: 1px solid #dadce0; border-radius: 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.3); outline: none; }
+    .route-summary { display: none; background: white; padding: 14px 18px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.2); font-size: 14px; line-height: 1.5; direction: rtl; text-align: right; min-width: 160px; border: 1px solid #eee; margin-left: 10px; margin-bottom: 25px; }
+    .route-summary h3 { color: #1a73e8; border-bottom: 1px solid #eee; padding-bottom: 5px; margin: 0 0 8px 0; font-size: 15px; }
+    .legend { display: none; background: rgba(255, 255, 255, 0.95); padding: 10px 14px; border-radius: 8px; font-size: 12px; box-shadow: 0 2px 6px rgba(0,0,0,0.25); margin-bottom: 25px; margin-right: 10px; min-width: 140px; }
     .legend-row { display: flex; align-items: center; margin-bottom: 6px; }
     .legend-color { width: 14px; height: 14px; border-radius: 50%; margin-left: 6px; }
-
-    /* 5. Info Window Badges */
     .status-badge { font-size: 11px; padding: 2px 6px; border-radius: 4px; color: white; display: inline-block; margin-left: 5px; }
     .bg-red { background-color: #d32f2f; }
     .bg-green { background-color: #388e3c; }
@@ -108,27 +43,19 @@
   <div id="map"></div>
 
   <script>
-    // --- Globals ---
     window.routeMarkers = [];
     let map, directionsService, directionsRenderer, infoWindow;
     let mapReady = false;
-    
-    // Arrival Logic Variables
     let currentShift = "AM"; 
     let endStopLocation = null; 
     let pmLastStudentLocation = null; 
     let hasTriggeredArrival = false;
     let userLocationMarker = null;
-
     let isBusTrackingActive = false;
-
-    // 🔥 CONFIG: 2000 meters ≈ 3 minutes driving at 40km/h
     const APPROACH_RADIUS = 2000; 
-
     const MY_MAP_ID = "48c2bb983bd19c1c44d95cb7";
     const BUS_ICON_URL = "https://raedapplebanon-spec.github.io/route-map/school-bus_6122028.png"; 
 
-    // --- 1. HELPER: Calculate Distance (Haversine) ---
     function haversineDistance(lat1, lng1, lat2, lng2) {
       const R = 6371e3; 
       const toRad = x => x * Math.PI / 180;
@@ -138,12 +65,10 @@
       return 2 * R * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
     }
 
-    // --- 2. HELPER: Group nearby stops ---
     function groupCloseLocations(stops, tolerance = 15) {
       const clusters = [];
       stops.forEach(stop => {
         let placed = false;
-        
         for (const c of clusters) {
           const d = haversineDistance(c.lat, c.lng, parseFloat(stop.lat), parseFloat(stop.lng));
           if (d < tolerance) {
@@ -156,7 +81,6 @@
             break;
           }
         }
-
         if (!placed) {
           clusters.push({
             lat: parseFloat(stop.lat),
@@ -172,7 +96,6 @@
       return clusters;
     }
 
-    // --- 3. UI: Update Summary Box ---
     function updateRouteSummary(km, minutes) {
       const summaryBox = document.getElementById("route-summary");
       const summaryText = document.getElementById("summary-text");
@@ -182,7 +105,6 @@
       }
     }
 
-    // --- 4. MAIN: Initialize Map ---
     window.initMap = async function() {
       try {
         const { Map } = await google.maps.importLibrary("maps");
@@ -219,11 +141,7 @@
         autocomplete.addListener("place_changed", () => {
             const place = autocomplete.getPlace();
             const searchText = (place.name || input.value || "").toLowerCase();
-
-            const foundMarker = window.routeMarkers.find(m => 
-                m.names.some(n => n.toLowerCase().includes(searchText))
-            );
-
+            const foundMarker = window.routeMarkers.find(m => m.names.some(n => n.toLowerCase().includes(searchText)));
             if (foundMarker) {
                 map.setCenter({ lat: foundMarker.lat, lng: foundMarker.lng });
                 map.setZoom(19);
@@ -231,7 +149,6 @@
                 infoWindow.open(map, foundMarker.marker);
                 return;
             }
-
             if (place.geometry && place.geometry.location) {
                 map.setCenter(place.geometry.location);
                 map.setZoom(17);
@@ -247,7 +164,6 @@
         });
 
         startLocationTracking();
-
         mapReady = true;
         console.log("✅ Assistant Map Initialized");
 
@@ -255,13 +171,9 @@
             window.setRouteData(window.pendingData.stops, window.pendingData.shift);
             window.pendingData = null;
         }
-
-      } catch (e) {
-        console.error("❌ initMap Failed:", e);
-      }
+      } catch (e) { console.error("❌ initMap Failed:", e); }
     };
 
-    // --- 5. LOCATION TRACKING (Smart Look-Ahead Radar) ---
     let locationWatchId = null;
 
     function startLocationTracking() {
@@ -269,35 +181,24 @@
             console.log("❌ Geolocation not supported");
             return;
         }
-
         if (locationWatchId !== null) {
             navigator.geolocation.clearWatch(locationWatchId);
             locationWatchId = null;
         }
 
-        const options = {
-            enableHighAccuracy: true,
-            maximumAge: 0,
-            timeout: 10000 
-        };
+        const options = { enableHighAccuracy: true, maximumAge: 0, timeout: 10000 };
 
         locationWatchId = navigator.geolocation.watchPosition((pos) => {
-            // --- ✅ SUCCESS: GPS IS WORKING ---
             const lat = pos.coords.latitude;
             const lng = pos.coords.longitude;
             const myLoc = { lat, lng };
             const myLocObj = new google.maps.LatLng(lat, lng);
 
-            // 1. Update Bus Icon
             if (!userLocationMarker) {
                 userLocationMarker = new google.maps.Marker({
                     map: map,
                     position: myLoc,
-                    icon: {
-                        url: BUS_ICON_URL, 
-                        scaledSize: new google.maps.Size(40, 40), 
-                        anchor: new google.maps.Point(20, 20) 
-                    },
+                    icon: { url: BUS_ICON_URL, scaledSize: new google.maps.Size(40, 40), anchor: new google.maps.Point(20, 20) },
                     title: "حافلة المدرسة",
                     zIndex: 999
                 });
@@ -306,16 +207,14 @@
             } else {
                 userLocationMarker.setPosition(myLoc);
             }
-
             map.panTo(myLoc); 
             isBusTrackingActive = true;
 
-            // 🔥 3. SMART LOOK-AHEAD RADAR (Fixed: Skips Assistant + Logs All Names)
+            // 🔥 3. SMART LOOK-AHEAD RADAR (Final Polish)
             if (window.orderedStopIds && window.orderedStopIds.length > 0) {
-                
                 let firstPendingIndex = -1;
                 
-                // A. Find the Index of the FIRST pending stop (SKIPPING ASSISTANT)
+                // A. Skip Assistant + Find Pending
                 for (let i = 0; i < window.orderedStopIds.length; i++) {
                     const id = window.orderedStopIds[i];
                     const markerObj = window.routeMarkers.find(m => m.items.some(item => item.id === id));
@@ -326,7 +225,7 @@
                             s.status !== 'dropped' && 
                             !s.isExcluded &&
                             !s.isStart &&
-                            s.type !== 'assistant' // 🛑 Ignore Assistant
+                            s.type !== 'assistant' // Ignore Assistant
                         );
                         if (isPending) {
                             firstPendingIndex = i;
@@ -335,22 +234,18 @@
                     }
                 }
 
-                // B. If we have a queue, Check the NEXT 3 stops
+                // B. Check Window
                 if (firstPendingIndex !== -1) {
                     const lookAheadCount = 3; 
-                    
                     let batchIds = [];
                     let batchNames = [];
 
                     for (let k = 0; k < lookAheadCount; k++) {
                         const targetIndex = firstPendingIndex + k;
-                        
                         if (targetIndex >= window.orderedStopIds.length) break;
 
                         const targetId = window.orderedStopIds[targetIndex];
                         const targetMarker = window.routeMarkers.find(m => m.items.some(item => item.id === targetId));
-
-                        // Double check we don't alert for the assistant if they happened to fall into the window
                         const isTargetAssistant = targetMarker.items.some(s => s.type === 'assistant');
 
                         if (targetMarker && !targetMarker.hasTriggeredApproach && !isTargetAssistant) {
@@ -358,25 +253,25 @@
                             const distToStop = google.maps.geometry.spherical.computeDistanceBetween(myLocObj, stopLoc);
 
                             if (distToStop < APPROACH_RADIUS) {
-                                targetMarker.hasTriggeredApproach = true; // Lock it 🔒
+                                targetMarker.hasTriggeredApproach = true; 
                                 
-                                // 📥 COLLECT ALL IDs at this stop
-                                batchIds.push(...targetMarker.items.map(i => i.id));
+                                // 🔥 FINAL FILTER: Ensure we ONLY grab non-excluded IDs
+                                const activeStudents = targetMarker.items.filter(s => !s.isExcluded);
                                 
-                                // 🔥 FIX: Join ALL names at this stop (e.g., "Ahmed & Sara")
-                                const namesAtThisStop = targetMarker.names.join(" & ");
-                                batchNames.push(namesAtThisStop);
-                                
-                                console.log("➕ Adding to batch: " + namesAtThisStop);
+                                if (activeStudents.length > 0) {
+                                    batchIds.push(...activeStudents.map(i => i.id));
+                                    const namesAtThisStop = activeStudents.map(s => s.name).join(" & ");
+                                    batchNames.push(namesAtThisStop);
+                                    console.log("➕ Adding to batch: " + namesAtThisStop);
+                                }
                             }
                         }
                     }
 
-                    // C. SEND ONE MESSAGE
+                    // C. Send Clean List
                     if (batchIds.length > 0) {
                         const finalNameString = batchNames.join(" + ");
                         console.log("📤 Sending Batch Alert: " + finalNameString);
-                        
                         sendToFlutter({ 
                             action: 'stopApproaching', 
                             stopIds: batchIds, 
@@ -385,202 +280,112 @@
                     }
                 }
             }
-            // 4. CHECK FINAL ARRIVAL (End Trip)
+
+            // 4. End Trip
             if (!hasTriggeredArrival) {
                 let targetLoc = null;
                 let triggerRadius = 50; 
-
                 if (currentShift === 'AM') {
-                    if (endStopLocation) {
-                        targetLoc = endStopLocation;
-                        triggerRadius = 1000;
-                    }
+                    if (endStopLocation) { targetLoc = endStopLocation; triggerRadius = 1000; }
                 } else {
-                    if (pmLastStudentLocation) {
-                        targetLoc = pmLastStudentLocation;
-                        triggerRadius = 100;
-                    } else if (endStopLocation) {
-                        targetLoc = endStopLocation;
-                        triggerRadius = 100;
-                    }
+                    if (pmLastStudentLocation) { targetLoc = pmLastStudentLocation; triggerRadius = 100; }
+                    else if (endStopLocation) { targetLoc = endStopLocation; triggerRadius = 100; }
                 }
-
                 if (targetLoc) {
                     const t = new google.maps.LatLng(targetLoc.lat, targetLoc.lng);
                     const dist = google.maps.geometry.spherical.computeDistanceBetween(myLocObj, t);
-                    
                     if (dist < triggerRadius) {
                         hasTriggeredArrival = true;
                         sendToFlutter({ action: 'arrivedAtEnd' });
                     }
                 }
             }
-
         }, (err) => {
-            // --- ❌ ERROR: GPS STOPPED WORKING ---
             console.warn(`⚠️ GPS Error (${err.code}): ${err.message}`);
-            
             if (err.code === 2 || err.code === 3) {
                 console.log("🔄 Connection lost. Restarting GPS tracking in 2 seconds...");
                 setTimeout(startLocationTracking, 2000);
             }
         }, options);
     }
-    // --- 6. DATA HANDLING ---
+
     window.addEventListener("message", function (event) {
       if (!event.data) return;
       let data = event.data;
       if (typeof data === 'string') { try { data = JSON.parse(data); } catch(e){} }
-      
       if (data.action === "setDriverRoute") {
           const stops = data.stops || [];
           const shift = data.shift || "AM"; 
-          
-          if (mapReady) {
-             window.setRouteData(stops, shift);
-          } else {
-             window.pendingData = { stops: stops, shift: shift };
-          }
+          if (mapReady) window.setRouteData(stops, shift);
+          else window.pendingData = { stops: stops, shift: shift };
       }
     });
 
-    // 🔥 MODIFIED: PRESERVE ALERT MEMORY ON REFRESH
     window.setRouteData = function(stops, shift) {
-      // 1. MEMORY SAVE: Backup IDs of students already alerted
       const alertedStudentIds = new Set();
       if (window.routeMarkers) {
           window.routeMarkers.forEach(m => {
-              if (m.hasTriggeredApproach) {
-                  m.items.forEach(s => alertedStudentIds.add(s.id));
-              }
+              if (m.hasTriggeredApproach) m.items.forEach(s => alertedStudentIds.add(s.id));
           });
       }
-
       currentShift = shift; 
-      
       window.routeMarkers.forEach(obj => obj.marker.map = null);
       window.routeMarkers = [];
       directionsRenderer.setDirections({ routes: [] });
       document.getElementById("route-summary").style.display = "none";
-      
       const bounds = new google.maps.LatLngBounds();
       const clusters = groupCloseLocations(stops, 15);
       const isPM = (currentShift === 'PM');
-      
       endStopLocation = null;
       pmLastStudentLocation = null;
       hasTriggeredArrival = false; 
 
       const addMarker = (cluster, color, text, html) => {
-         const pin = new google.maps.marker.PinElement({
-             background: color,
-             borderColor: "#FFFFFF",
-             glyphColor: "#FFFFFF",
-             glyphText: text 
-         });
-         
-         const marker = new google.maps.marker.AdvancedMarkerElement({
-             map: map,
-             position: { lat: cluster.lat, lng: cluster.lng },
-             content: pin.element,
-         });
-
-         marker.addListener("click", () => {
-             infoWindow.setContent(html);
-             infoWindow.open(map, marker);
-         });
-         
-         // 2. MEMORY RESTORE: Check if this cluster contains already alerted students
+         const pin = new google.maps.marker.PinElement({ background: color, borderColor: "#FFFFFF", glyphColor: "#FFFFFF", glyphText: text });
+         const marker = new google.maps.marker.AdvancedMarkerElement({ map: map, position: { lat: cluster.lat, lng: cluster.lng }, content: pin.element });
+         marker.addListener("click", () => { infoWindow.setContent(html); infoWindow.open(map, marker); });
          const isAlreadyTriggered = cluster.items.some(s => alertedStudentIds.has(s.id));
-
          window.routeMarkers.push({
-             marker, pin,
-             names: cluster.items.map(i => i.name || ""),
-             html, 
-             lat: cluster.lat, 
-             lng: cluster.lng,
-             isStart: cluster.isStart,
-             isEnd: cluster.isEnd,
-             items: cluster.items, 
-             hasTriggeredApproach: isAlreadyTriggered // 🔥 RESTORE LOCK
+             marker, pin, names: cluster.items.map(i => i.name || ""), html, lat: cluster.lat, lng: cluster.lng,
+             isStart: cluster.isStart, isEnd: cluster.isEnd, items: cluster.items, hasTriggeredApproach: isAlreadyTriggered 
          });
       };
 
       clusters.forEach(cluster => {
           const pos = { lat: cluster.lat, lng: cluster.lng };
           bounds.extend(pos);
-
-          let color = "#1a73e8"; 
-          let text = cluster.items.length.toString();
-          let header = "نقطة تجمع";
-
-          if (cluster.isStart) {
-             color = "#00c853"; text = "S"; header = "نقطة البداية";
-          } else if (cluster.isEnd) {
-             color = "#d50000"; text = "E"; header = "نقطة النهاية";
-             endStopLocation = pos; 
-          } else if (cluster.stopType === 'assistant') {
-             color = "#9C27B0"; text = "A"; header = "المرافق";
-          } else if (cluster.isExcluded) {
-             color = "#757575"; 
-          } else {
+          let color = "#1a73e8"; let text = cluster.items.length.toString(); let header = "نقطة تجمع";
+          if (cluster.isStart) { color = "#00c853"; text = "S"; header = "نقطة البداية"; }
+          else if (cluster.isEnd) { color = "#d50000"; text = "E"; header = "نقطة النهاية"; endStopLocation = pos; }
+          else if (cluster.stopType === 'assistant') { color = "#9C27B0"; text = "A"; header = "المرافق"; }
+          else if (cluster.isExcluded) { color = "#757575"; }
+          else {
              const allDone = cluster.items.every(s => s.status === 'picked' || s.status === 'dropped');
-             if (allDone) {
-                 color = "#388e3c"; 
-             } else {
-                 color = "#d32f2f"; 
-             }
+             if (allDone) color = "#388e3c"; else color = "#d32f2f"; 
           }
-
           let rows = cluster.items.map(s => {
-              if (s.type === 'assistant') {
-                  return `<div style="margin-bottom:6px; border-bottom:1px solid #eee; padding-bottom:4px;">
-                            <b>${s.name || 'مرافق'}</b>
-                          </div>`;
-              }
-              let badgeColor = 'bg-red';
-              let statusTxt = isPM ? 'لم يتم التنزيل' : 'لم يتم التحميل'; 
-
-              if (s.status === 'picked') { 
-                  badgeColor = 'bg-green'; statusTxt = 'تم التحميل'; 
-              } else if (s.status === 'dropped') { 
-                  badgeColor = 'bg-green'; statusTxt = 'تم التنزيل'; 
-              } else if (s.isExcluded) { 
-                  badgeColor = 'bg-gray'; statusTxt = 'مستبعد'; 
-              }
-
-              return `<div style="margin-bottom:6px; border-bottom:1px solid #eee; padding-bottom:4px;">
-                        <span class="status-badge ${badgeColor}">${statusTxt}</span>
-                        <b>${s.name || 'طالب'}</b><br>
-                        <span style="font-size:12px; color:#555;">${s.grade || ''}</span>
-                      </div>`;
+              if (s.type === 'assistant') return `<div style="margin-bottom:6px; border-bottom:1px solid #eee; padding-bottom:4px;"><b>${s.name || 'مرافق'}</b></div>`;
+              let badgeColor = 'bg-red'; let statusTxt = isPM ? 'لم يتم التنزيل' : 'لم يتم التحميل'; 
+              if (s.status === 'picked') { badgeColor = 'bg-green'; statusTxt = 'تم التحميل'; }
+              else if (s.status === 'dropped') { badgeColor = 'bg-green'; statusTxt = 'تم التنزيل'; }
+              else if (s.isExcluded) { badgeColor = 'bg-gray'; statusTxt = 'مستبعد'; }
+              return `<div style="margin-bottom:6px; border-bottom:1px solid #eee; padding-bottom:4px;"><span class="status-badge ${badgeColor}">${statusTxt}</span><b>${s.name || 'طالب'}</b><br><span style="font-size:12px; color:#555;">${s.grade || ''}</span></div>`;
           }).join('');
-
-          let html = `<div style="color:black;text-align:right;direction:rtl;min-width:180px;">
-                        <b style="color:${color}; font-size:14px;">${header}</b><hr>
-                        ${rows}
-                      </div>`;
-
+          let html = `<div style="color:black;text-align:right;direction:rtl;min-width:180px;"><b style="color:${color}; font-size:14px;">${header}</b><hr>${rows}</div>`;
           addMarker(cluster, color, text, html);
       });
 
       if (clusters.length >= 2) calculateRoadRoute(clusters);
-      if (!isBusTrackingActive && !bounds.isEmpty()) {
-          map.fitBounds(bounds);
-      }
+      if (!isBusTrackingActive && !bounds.isEmpty()) map.fitBounds(bounds);
     };
 
-    // --- 7. ROUTE CALCULATION ---
     function calculateRoadRoute(clusters) {
        const startPoint = clusters.find(c => c.isStart);
        const endPoint = clusters.find(c => c.isEnd);
        if (!startPoint || !endPoint) return;
-
        const activeClusters = clusters.filter(c => !c.isExcluded);
-
        const assistants = activeClusters.filter(c => c.stopType === 'assistant');
        const students = activeClusters.filter(c => c !== startPoint && c !== endPoint && c.stopType !== 'assistant');
-
        let waypoints = [];
        assistants.forEach(a => waypoints.push({ location: {lat: a.lat, lng: a.lng}, stopover: true }));
        students.forEach(s => waypoints.push({ location: {lat: s.lat, lng: s.lng}, stopover: true }));
@@ -588,51 +393,36 @@
        directionsService.route({
            origin: { lat: startPoint.lat, lng: startPoint.lng },
            destination: { lat: endPoint.lat, lng: endPoint.lng },
-           waypoints: waypoints,
-           travelMode: google.maps.TravelMode.DRIVING,
-           optimizeWaypoints: true,
+           waypoints: waypoints, travelMode: google.maps.TravelMode.DRIVING, optimizeWaypoints: true,
        }, (result, status) => {
            if (status === "OK") {
                directionsRenderer.setDirections(result);
-               
                const orderIndices = result.routes[0].waypoint_order;
                let orderedIds = [];
-               
                orderedIds.push(startPoint.items[0].id);
                orderIndices.forEach(idx => {
                    const cluster = [...assistants, ...students][idx];
                    cluster.items.forEach(item => orderedIds.push(item.id));
                });
                orderedIds.push(endPoint.items[0].id);
-
                if (currentShift === 'PM' && orderIndices.length > 0) {
                    const lastIndex = orderIndices[orderIndices.length - 1];
                    const lastCluster = [...assistants, ...students][lastIndex];
-                   if (lastCluster) {
-                       pmLastStudentLocation = { lat: lastCluster.lat, lng: lastCluster.lng };
-                   }
+                   if (lastCluster) pmLastStudentLocation = { lat: lastCluster.lat, lng: lastCluster.lng };
                }
-
                let dist = 0, dur = 0;
                result.routes[0].legs.forEach(l => { dist += l.distance.value; dur += l.duration.value; });
                updateRouteSummary((dist/1000).toFixed(1), Math.round(dur/60));
-
-               // 🔥 IMPORTANT: Update Global Order for Radar
                window.orderedStopIds = orderedIds; 
                sendToFlutter({ action: 'routeOrdered', orderedIds: orderedIds });
            }
        });
     }
 
-    // --- 8. BRIDGE ---
     function sendToFlutter(payload) {
-        if (window.FlutterChan) {
-            window.FlutterChan.postMessage(JSON.stringify(payload));
-        } else {
-            window.parent.postMessage(payload, "*");
-        }
+        if (window.FlutterChan) window.FlutterChan.postMessage(JSON.stringify(payload));
+        else window.parent.postMessage(payload, "*");
     }
-    
   </script>
 </body>
 </html>
