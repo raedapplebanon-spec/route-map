@@ -223,16 +223,29 @@
             map.panTo(myLoc); 
             isBusTrackingActive = true;
 
+            // 🔥 3. SMART LOOK-AHEAD RADAR
             if (window.orderedStopIds && window.orderedStopIds.length > 0) {
                 let firstPendingIndex = -1;
+                
                 for (let i = 0; i < window.orderedStopIds.length; i++) {
                     const id = window.orderedStopIds[i];
                     const markerObj = window.routeMarkers.find(m => m.items.some(item => item.id === id));
+                    
                     if (markerObj) {
-                        const isPending = markerObj.items.some(s => 
-                            s.status !== 'picked' && s.status !== 'dropped' && 
-                            !s.isExcluded && !s.isStart && s.type !== 'assistant'
-                        );
+                        const isPending = markerObj.items.some(s => {
+                            // 1. Basic Filters
+                            if (s.isExcluded || s.isStart || s.type === 'assistant') return false;
+
+                            // 🔥 2. SHIFT SPECIFIC LOGIC (THE FIX)
+                            if (currentShift === 'AM') {
+                                // AM: We are pending if NOT Picked (and not dropped)
+                                return s.status !== 'picked' && s.status !== 'dropped';
+                            } else {
+                                // PM: We are pending if NOT Dropped (Ignore 'picked' because they are ON the bus)
+                                return s.status !== 'dropped';
+                            }
+                        });
+
                         if (isPending) { firstPendingIndex = i; break; }
                     }
                 }
@@ -274,7 +287,7 @@
                 let targetLoc = null;
                 let triggerRadius = 50; 
                 if (currentShift === 'AM') {
-                    if (endStopLocation) { targetLoc = endStopLocation; triggerRadius = 100; }
+                    if (endStopLocation) { targetLoc = endStopLocation; triggerRadius = 300; }
                 } else {
                     if (pmLastStudentLocation) { targetLoc = pmLastStudentLocation; triggerRadius = 100; }
                     else if (endStopLocation) { targetLoc = endStopLocation; triggerRadius = 100; }
@@ -339,12 +352,14 @@
          });
       };
 
-      // 🔥 Initial Render: Uses Count or "A". Correct Order comes after API call.
-      clusters.forEach(cluster => {
+      // 🔥 UPDATED LOOP: Use 'index' to set the Pin Text to "1, 2, 3"
+      clusters.forEach((cluster, index) => {
           const pos = { lat: cluster.lat, lng: cluster.lng };
           bounds.extend(pos);
           let color = "#1a73e8"; 
-          let text = cluster.items.length.toString(); 
+          
+          // 🔥 CHANGED: Shows Order Number (index + 1)
+          let text = (index + 1).toString(); 
           let header = "نقطة تجمع";
 
           if (cluster.isStart) { color = "#00c853"; text = "S"; header = "نقطة البداية"; }
@@ -394,18 +409,12 @@
                let orderedIds = [];
                let visualCounter = 1;
 
-               // 1. Add Start
                orderedIds.push(startPoint.items[0].id);
-
-               // 2. Process Optimized Waypoints
                orderIndices.forEach(idx => {
-                   // Get the cluster based on optimized order
                    const cluster = [...assistants, ...students][idx];
-                   
-                   // Build ID list for Flutter
                    cluster.items.forEach(item => orderedIds.push(item.id));
                    
-                   // 🔥 UPDATE MARKER TEXT: Find marker by location and set optimized "1, 2, 3"
+                   // 🔥 RE-UPDATE MARKER TEXT to match Optimized Order
                    const markerObj = window.routeMarkers.find(m => 
                        Math.abs(m.lat - cluster.lat) < 0.00001 && 
                        Math.abs(m.lng - cluster.lng) < 0.00001
@@ -415,8 +424,6 @@
                    }
                    visualCounter++;
                });
-
-               // 3. Add End
                orderedIds.push(endPoint.items[0].id);
 
                if (currentShift === 'PM' && orderIndices.length > 0) {
