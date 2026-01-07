@@ -53,7 +53,7 @@
     let hasTriggeredArrival = false;
     let userLocationMarker = null;
     
-    // 🔥 NEW: Radar Circle Visualization
+    // 🔥 Radar Circle Visualization
     let radarCircle = null;
 
     let isBusTrackingActive = false;
@@ -238,19 +238,19 @@
                     zIndex: 999
                 });
                 
-                // 🔥 NEW: Draw the Radar Circle
+                // 🔥 NEW: Draw the Radar Circle (Semi-transparent Blue)
                 radarCircle = new google.maps.Circle({
                     strokeColor: "#1a73e8",
                     strokeOpacity: 0.8,
                     strokeWeight: 2,
                     fillColor: "#1a73e8",
-                    fillOpacity: 0.15, // Light blue transparent fill
+                    fillOpacity: 0.15,
                     map: map,
                     center: myLoc,
                     radius: APPROACH_RADIUS 
                 });
 
-                map.setZoom(14); // Zoom out a bit to see the circle
+                map.setZoom(15); 
                 isBusTrackingActive = true; 
             } else {
                 userLocationMarker.setPosition(myLoc);
@@ -262,7 +262,7 @@
             map.panTo(myLoc); 
             isBusTrackingActive = true;
 
-            // 🔥 3. SMART LOOK-AHEAD RADAR (Fixed: Skips Assistant + Logs All Names)
+            // 🔥 3. SMART LOOK-AHEAD RADAR (Final Polish)
             if (window.orderedStopIds && window.orderedStopIds.length > 0) {
                 
                 let firstPendingIndex = -1;
@@ -460,12 +460,14 @@
          });
       };
 
-      clusters.forEach(cluster => {
+      // 🔥 UPDATED LOOP: Use 'index' to set the Pin Text to "1, 2, 3"
+      clusters.forEach((cluster, index) => {
           const pos = { lat: cluster.lat, lng: cluster.lng };
           bounds.extend(pos);
 
           let color = "#1a73e8"; 
-          let text = cluster.items.length.toString(); 
+          // 🔥 CHANGED: Now shows Order Number (index + 1)
+          let text = (index + 1).toString(); 
           let header = "نقطة تجمع";
 
           if (cluster.isStart) { color = "#00c853"; text = "S"; header = "نقطة البداية"; }
