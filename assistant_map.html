@@ -262,7 +262,6 @@
     };
 
     // --- 5. LOCATION TRACKING (Smart Look-Ahead Radar) ---
-    // Global variable to track the watcher (prevents duplicates)
     let locationWatchId = null;
 
     function startLocationTracking() {
@@ -271,7 +270,6 @@
             return;
         }
 
-        // 1. CLEAR PREVIOUS WATCHER (Important for restarts)
         if (locationWatchId !== null) {
             navigator.geolocation.clearWatch(locationWatchId);
             locationWatchId = null;
@@ -280,7 +278,7 @@
         const options = {
             enableHighAccuracy: true,
             maximumAge: 0,
-            timeout: 10000 // Wait 10s before considering it a "Timeout" error
+            timeout: 10000 
         };
 
         locationWatchId = navigator.geolocation.watchPosition((pos) => {
@@ -312,7 +310,7 @@
             map.panTo(myLoc); 
             isBusTrackingActive = true;
 
-            // 🔥 3. SMART LOOK-AHEAD RADAR (Fixed: Skips Assistant)
+            // 🔥 3. SMART LOOK-AHEAD RADAR (Fixed: Skips Assistant + Logs All Names)
             if (window.orderedStopIds && window.orderedStopIds.length > 0) {
                 
                 let firstPendingIndex = -1;
@@ -328,7 +326,7 @@
                             s.status !== 'dropped' && 
                             !s.isExcluded &&
                             !s.isStart &&
-                            s.type !== 'assistant' // 🛑 CRITICAL FIX: Ignore Assistant!
+                            s.type !== 'assistant' // 🛑 Ignore Assistant
                         );
                         if (isPending) {
                             firstPendingIndex = i;
@@ -360,23 +358,29 @@
                             const distToStop = google.maps.geometry.spherical.computeDistanceBetween(myLocObj, stopLoc);
 
                             if (distToStop < APPROACH_RADIUS) {
-                                targetMarker.hasTriggeredApproach = true; 
+                                targetMarker.hasTriggeredApproach = true; // Lock it 🔒
                                 
+                                // 📥 COLLECT ALL IDs at this stop
                                 batchIds.push(...targetMarker.items.map(i => i.id));
-                                batchNames.push(targetMarker.names[0]);
                                 
-                                console.log("➕ Adding to batch: " + targetMarker.names[0]);
+                                // 🔥 FIX: Join ALL names at this stop (e.g., "Ahmed & Sara")
+                                const namesAtThisStop = targetMarker.names.join(" & ");
+                                batchNames.push(namesAtThisStop);
+                                
+                                console.log("➕ Adding to batch: " + namesAtThisStop);
                             }
                         }
                     }
 
                     // C. SEND ONE MESSAGE
                     if (batchIds.length > 0) {
-                        console.log("📤 Sending Batch Alert");
+                        const finalNameString = batchNames.join(" + ");
+                        console.log("📤 Sending Batch Alert: " + finalNameString);
+                        
                         sendToFlutter({ 
                             action: 'stopApproaching', 
                             stopIds: batchIds, 
-                            stopName: batchNames.join(" + ") 
+                            stopName: finalNameString
                         });
                     }
                 }
@@ -416,12 +420,8 @@
             // --- ❌ ERROR: GPS STOPPED WORKING ---
             console.warn(`⚠️ GPS Error (${err.code}): ${err.message}`);
             
-            // Code 2 = Position Unavailable (Simulator issue / Tunnel)
-            // Code 3 = Timeout
             if (err.code === 2 || err.code === 3) {
                 console.log("🔄 Connection lost. Restarting GPS tracking in 2 seconds...");
-                
-                // 🔥 THE FIX: Automatically restart after 2 seconds
                 setTimeout(startLocationTracking, 2000);
             }
         }, options);
@@ -469,8 +469,6 @@
       
       endStopLocation = null;
       pmLastStudentLocation = null;
-      // Note: We don't reset hasTriggeredArrival here if we want to remember End Trip too, 
-      // but usually End Trip requires action so reset is fine.
       hasTriggeredArrival = false; 
 
       const addMarker = (cluster, color, text, html) => {
@@ -634,7 +632,6 @@
             window.parent.postMessage(payload, "*");
         }
     }
-
     
   </script>
 </body>
