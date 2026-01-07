@@ -223,26 +223,28 @@
             map.panTo(myLoc); 
             isBusTrackingActive = true;
 
-            // 🔥 3. SMART LOOK-AHEAD RADAR (Simplified & Universal)
+            // 🔥 3. SMART LOOK-AHEAD RADAR (STRICT STUDENT FILTER)
             if (window.orderedStopIds && window.orderedStopIds.length > 0) {
                 let firstPendingIndex = -1;
                 
+                // A. Find the Cursor (First Pending Student)
                 for (let i = 0; i < window.orderedStopIds.length; i++) {
                     const id = window.orderedStopIds[i];
                     const markerObj = window.routeMarkers.find(m => m.items.some(item => item.id === id));
                     
                     if (markerObj) {
-                        // SIMPLE CHECK: Is there anyone Pending here?
-                        // (Ignores Excluded, Assistant, Start)
+                        // STRICT Logic: Only type 'student' who is 'pending' and not excluded
                         const isPending = markerObj.items.some(s => 
-                            !s.isExcluded && !s.isStart && s.type !== 'assistant' &&
-                            s.status === 'pending'
+                            s.type === 'student' && 
+                            s.status === 'pending' && 
+                            !s.isExcluded
                         );
 
                         if (isPending) { firstPendingIndex = i; break; }
                     }
                 }
 
+                // B. Scan the next 3 stops starting from Cursor
                 if (firstPendingIndex !== -1) {
                     const lookAheadCount = 3; 
                     let batchIds = [];
@@ -252,15 +254,23 @@
                         if (targetIndex >= window.orderedStopIds.length) break;
                         const targetId = window.orderedStopIds[targetIndex];
                         const targetMarker = window.routeMarkers.find(m => m.items.some(item => item.id === targetId));
-                        const isTargetAssistant = targetMarker.items.some(s => s.type === 'assistant');
-                        if (targetMarker && !targetMarker.hasTriggeredApproach && !isTargetAssistant) {
+                        
+                        // Ensure we don't accidentally target an Assistant or Driver
+                        // NOTE: The strict filter below handles it, but good to check marker type if needed.
+                        
+                        if (targetMarker && !targetMarker.hasTriggeredApproach) {
                             const stopLoc = new google.maps.LatLng(targetMarker.lat, targetMarker.lng);
                             const distToStop = google.maps.geometry.spherical.computeDistanceBetween(myLocObj, stopLoc);
+                            
                             if (distToStop < APPROACH_RADIUS) {
-                                targetMarker.hasTriggeredApproach = true;
+                                targetMarker.hasTriggeredApproach = true; // Lock it 🔒
                                 
                                 // 🔥 FILTER: Only get Pending, Active Students
-                                const activeStudents = targetMarker.items.filter(s => !s.isExcluded && s.status === 'pending');
+                                const activeStudents = targetMarker.items.filter(s => 
+                                    s.type === 'student' && 
+                                    s.status === 'pending' && 
+                                    !s.isExcluded
+                                );
                                 
                                 if (activeStudents.length > 0) {
                                     batchIds.push(...activeStudents.map(i => i.id));
@@ -361,11 +371,12 @@
           else if (cluster.stopType === 'assistant') { color = "#9C27B0"; text = "A"; header = "المرافق"; }
           else if (cluster.isExcluded) { color = "#757575"; } 
           else {
-             const activeItems = cluster.items.filter(s => !s.isExcluded);
-             // 🔥 FIX: Color based on "Pending" check. If ANY are pending, it's Red.
-             // If ALL active items are (Picked OR Dropped), then Green.
-             const allDone = activeItems.length > 0 && activeItems.every(s => s.status === 'picked' || s.status === 'dropped');
-             if (allDone) color = "#388e3c"; else color = "#d32f2f"; 
+             // 🔥 Color Logic: Only Pending Students make it Red.
+             const activeStudents = cluster.items.filter(s => s.type === 'student' && !s.isExcluded);
+             const anyPending = activeStudents.some(s => s.status === 'pending');
+             
+             // If there are students and any are pending -> Red. Otherwise -> Green.
+             if (activeStudents.length > 0 && anyPending) color = "#d32f2f"; else color = "#388e3c"; 
           }
           let rows = cluster.items.map(s => {
               if (s.type === 'assistant') return `<div style="margin-bottom:6px; border-bottom:1px solid #eee; padding-bottom:4px;"><b>${s.name || 'مرافق'}</b></div>`;
@@ -410,7 +421,6 @@
                    const cluster = [...assistants, ...students][idx];
                    cluster.items.forEach(item => orderedIds.push(item.id));
                    
-                   // 🔥 RE-UPDATE MARKER TEXT to match Optimized Order
                    const markerObj = window.routeMarkers.find(m => 
                        Math.abs(m.lat - cluster.lat) < 0.00001 && 
                        Math.abs(m.lng - cluster.lng) < 0.00001
