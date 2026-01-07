@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <title>Assistant Route Map</title>
+  
   <style>
     html, body { height: 100%; margin: 0; padding: 0; overflow: hidden; font-family: 'Segoe UI', Tahoma, sans-serif; }
     #map { height: 100%; width: 100%; }
@@ -18,10 +19,13 @@
     .bg-blue { background-color: #1976D2; }
     .bg-gray { background-color: #757575; }
   </style>
+
   <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCYaJ4Gjq36mq8swYgjNXOYr5mKZi45niA&callback=initMap&libraries=marker,places,geometry&loading=async&v=weekly" async defer></script>
 </head>
+
 <body>
   <input id="pac-input" type="text" placeholder="ابحث عن عنوان أو اسم طالب..." />
+  
   <div id="legend" class="legend">
     <div class="legend-row"><div class="legend-color" style="background:#00c853"></div><span>البداية</span></div>
     <div class="legend-row"><div class="legend-color" style="background:#d50000"></div><span>النهاية</span></div>
@@ -30,27 +34,38 @@
     <div class="legend-row"><div class="legend-color" style="background:#388e3c"></div><span>مكتمل</span></div>
     <div class="legend-row"><div class="legend-color" style="background:#757575"></div><span>مستبعد</span></div>
   </div>
+
   <div id="route-summary" class="route-summary">
     <h3>📍 ملخص الجولة</h3>
     <div id="summary-text">—</div>
   </div>
+
   <div id="map"></div>
+
   <script>
     // --- Globals ---
     window.routeMarkers = [];
     let map, directionsService, directionsRenderer, infoWindow;
     let mapReady = false;
-    let currentShift = "AM";
+    let currentShift = "AM"; 
+    
+    // Route Type Flag (first_morning, midday, last_evening)
     let currentRouteType = "first_morning"; 
+
     let startStopLocation = null; 
     let endStopLocation = null; 
     let pmLastStudentLocation = null; 
+    
     let hasTriggeredArrival = false;
     let hasLeftStartZone = false; 
+
     let userLocationMarker = null;
     let radarCircle = null;
     let isBusTrackingActive = false;
+
+    // 🔥 CONFIG: 300 meters
     const APPROACH_RADIUS = 300; 
+
     const MY_MAP_ID = "48c2bb983bd19c1c44d95cb7";
     const BUS_ICON_URL = "https://raedapplebanon-spec.github.io/route-map/school-bus_6122028.png"; 
 
@@ -108,22 +123,34 @@
         const { Map } = await google.maps.importLibrary("maps");
         const { AdvancedMarkerElement, PinElement } = await google.maps.importLibrary("marker");
         const { Places } = await google.maps.importLibrary("places");
+
         infoWindow = new google.maps.InfoWindow();
+
         map = new Map(document.getElementById("map"), {
           center: { lat: 32.028031, lng: 35.704308 },
-          zoom: 13, mapId: MY_MAP_ID, mapTypeControl: true, streetViewControl: false, fullscreenControl: false
+          zoom: 13,
+          mapId: MY_MAP_ID,
+          mapTypeControl: true,
+          streetViewControl: false,
+          fullscreenControl: false
         });
+
         const input = document.getElementById("pac-input");
         const legend = document.getElementById("legend");
         const summary = document.getElementById("route-summary");
+
         map.controls[google.maps.ControlPosition.TOP_LEFT].push(input);
         map.controls[google.maps.ControlPosition.RIGHT_BOTTOM].push(legend);
         map.controls[google.maps.ControlPosition.LEFT_BOTTOM].push(summary);
+
         const autocomplete = new google.maps.places.Autocomplete(input);
         autocomplete.bindTo("bounds", map);
+
         google.maps.event.addListenerOnce(map, 'tilesloaded', () => {
-           input.style.display = "block"; legend.style.display = "block";
+           input.style.display = "block";
+           legend.style.display = "block";
         });
+
         autocomplete.addListener("place_changed", () => {
             const place = autocomplete.getPlace();
             const searchText = (place.name || input.value || "").toLowerCase();
@@ -140,66 +167,107 @@
                 map.setZoom(17);
             }
         });
+
         directionsService = new google.maps.DirectionsService();
         directionsRenderer = new google.maps.DirectionsRenderer({
-            map: map, suppressMarkers: true, preserveViewport: true, polylineOptions: { strokeColor: "#1a73e8", strokeOpacity: 0.8, strokeWeight: 5 }
+            map: map,
+            suppressMarkers: true,
+            preserveViewport: true,
+            polylineOptions: { strokeColor: "#1a73e8", strokeOpacity: 0.8, strokeWeight: 5 }
         });
+
         startLocationTracking();
         mapReady = true;
         console.log("✅ Assistant Map Initialized");
+
         if (window.pendingData) {
             window.setRouteData(window.pendingData.stops, window.pendingData.shift, window.pendingData.routeType);
             window.pendingData = null;
         }
-      } catch (e) { console.error("❌ initMap Failed:", e); }
+      } catch (e) {
+        console.error("❌ initMap Failed:", e);
+      }
     };
 
+    let locationWatchId = null;
+
     function startLocationTracking() {
-        if (!navigator.geolocation) { console.log("❌ Geolocation not supported"); return; }
-        if (locationWatchId !== null) { navigator.geolocation.clearWatch(locationWatchId); locationWatchId = null; }
+        if (!navigator.geolocation) {
+            console.log("❌ Geolocation not supported");
+            return;
+        }
+        if (locationWatchId !== null) {
+            navigator.geolocation.clearWatch(locationWatchId);
+            locationWatchId = null;
+        }
         const options = { enableHighAccuracy: true, maximumAge: 0, timeout: 10000 };
+
         locationWatchId = navigator.geolocation.watchPosition((pos) => {
             const lat = pos.coords.latitude;
             const lng = pos.coords.longitude;
             const myLoc = { lat, lng };
             const myLocObj = new google.maps.LatLng(lat, lng);
+
             if (!userLocationMarker) {
                 userLocationMarker = new google.maps.Marker({
-                    map: map, position: myLoc, icon: { url: BUS_ICON_URL, scaledSize: new google.maps.Size(40, 40), anchor: new google.maps.Point(20, 20) }, title: "حافلة المدرسة", zIndex: 999
+                    map: map,
+                    position: myLoc,
+                    icon: { url: BUS_ICON_URL, scaledSize: new google.maps.Size(40, 40), anchor: new google.maps.Point(20, 20) },
+                    title: "حافلة المدرسة",
+                    zIndex: 999
                 });
+                
                 radarCircle = new google.maps.Circle({
-                    strokeColor: "#1a73e8", strokeOpacity: 0.8, strokeWeight: 2, fillColor: "#1a73e8", fillOpacity: 0.15, map: map, center: myLoc, radius: APPROACH_RADIUS 
+                    strokeColor: "#1a73e8", strokeOpacity: 0.8, strokeWeight: 2,
+                    fillColor: "#1a73e8", fillOpacity: 0.15,
+                    map: map, center: myLoc, radius: APPROACH_RADIUS 
                 });
-                map.setZoom(15); isBusTrackingActive = true; 
+                map.setZoom(15); 
+                isBusTrackingActive = true; 
             } else {
-                userLocationMarker.setPosition(myLoc); if (radarCircle) radarCircle.setCenter(myLoc);
+                userLocationMarker.setPosition(myLoc);
+                if (radarCircle) radarCircle.setCenter(myLoc);
             }
-            map.panTo(myLoc); isBusTrackingActive = true;
+            map.panTo(myLoc); 
+            isBusTrackingActive = true;
 
-            // --- RADAR LOGIC ---
+            // 🔥 3. SMART LOOK-AHEAD RADAR (STRICT FILTER)
             if (window.orderedStopIds && window.orderedStopIds.length > 0) {
                 let firstPendingIndex = -1;
+                
                 for (let i = 0; i < window.orderedStopIds.length; i++) {
                     const id = window.orderedStopIds[i];
                     const markerObj = window.routeMarkers.find(m => m.items.some(item => item.id === id));
+                    
                     if (markerObj) {
-                        const isPending = markerObj.items.some(s => s.type === 'student' && s.status === 'pending' && !s.isExcluded);
+                        const isPending = markerObj.items.some(s => 
+                            s.type === 'student' && 
+                            s.status === 'pending' && 
+                            !s.isExcluded
+                        );
                         if (isPending) { firstPendingIndex = i; break; }
                     }
                 }
+
                 if (firstPendingIndex !== -1) {
-                    const lookAheadCount = 3; let batchIds = []; let batchNames = [];
+                    const lookAheadCount = 3; 
+                    let batchIds = [];
+                    let batchNames = [];
                     for (let k = 0; k < lookAheadCount; k++) {
                         const targetIndex = firstPendingIndex + k;
                         if (targetIndex >= window.orderedStopIds.length) break;
                         const targetId = window.orderedStopIds[targetIndex];
                         const targetMarker = window.routeMarkers.find(m => m.items.some(item => item.id === targetId));
+                        
                         if (targetMarker && !targetMarker.hasTriggeredApproach) {
                             const stopLoc = new google.maps.LatLng(targetMarker.lat, targetMarker.lng);
                             const distToStop = google.maps.geometry.spherical.computeDistanceBetween(myLocObj, stopLoc);
+                            
                             if (distToStop < APPROACH_RADIUS) {
-                                targetMarker.hasTriggeredApproach = true; 
-                                const activeStudents = targetMarker.items.filter(s => s.type === 'student' && s.status === 'pending' && !s.isExcluded);
+                                targetMarker.hasTriggeredApproach = true;
+                                const activeStudents = targetMarker.items.filter(s => 
+                                    s.type === 'student' && s.status === 'pending' && !s.isExcluded
+                                );
                                 if (activeStudents.length > 0) {
                                     batchIds.push(...activeStudents.map(i => i.id));
                                     const namesAtThisStop = activeStudents.map(s => s.name).join(" & ");
@@ -217,56 +285,82 @@
                 }
             }
 
-            // --- ARRIVAL LOGIC ---
+            // 🔥 4. CHECK FINAL ARRIVAL
             
-            // Step A: Latch Logic
+            // Step A: Handle "Leaving Zone" Latch for Midday
             if (currentRouteType === 'midday' && !hasLeftStartZone && startStopLocation) {
                 const startLocObj = new google.maps.LatLng(startStopLocation.lat, startStopLocation.lng);
                 const distFromStart = google.maps.geometry.spherical.computeDistanceBetween(myLocObj, startLocObj);
-                // console.log("📏 Dist from Start:", distFromStart); // Debugging
-                if (distFromStart > 500) { 
+                
+                if (distFromStart > 500) { // Must drive 500m away to arm the system
                     hasLeftStartZone = true;
-                    console.log("🔓 Bus Left Zone. Armed.");
+                    console.log("🔓 Bus has left the school zone. Arrival detection armed.");
                 }
             }
 
-            // Step B: Trigger Logic
+            // Step B: Check Arrival
             if (!hasTriggeredArrival) {
                 let targetLoc = null;
                 let triggerRadius = 50; 
                 let canTrigger = true;
 
+                // 1. FIRST MORNING (Home -> School)
                 if (currentRouteType === 'first_morning') {
-                    if (endStopLocation) { targetLoc = endStopLocation; triggerRadius = 300; }
-                }
-                else if (currentRouteType === 'midday') {
-                    if (endStopLocation) { 
-                        targetLoc = endStopLocation; triggerRadius = 300; 
-                        if (!hasLeftStartZone) { canTrigger = false; }
+                    if (endStopLocation) {
+                        targetLoc = endStopLocation; // School
+                        triggerRadius = 300; 
                     }
                 }
-                else if (currentRouteType === 'last_evening') {
-                    if (pmLastStudentLocation) { targetLoc = pmLastStudentLocation; triggerRadius = 100; }
-                    else if (endStopLocation) { targetLoc = endStopLocation; triggerRadius = 100; }
+                
+                // 2. MIDDAY (School -> School)
+                else if (currentRouteType === 'midday') {
+                    if (endStopLocation) {
+                        targetLoc = endStopLocation; // School
+                        triggerRadius = 300;
+                        if (!hasLeftStartZone) canTrigger = false; 
+                    }
                 }
-                else { // Fallback
-                    if (currentShift === 'AM') { if (endStopLocation) { targetLoc = endStopLocation; triggerRadius = 300; } }
-                    else { if (pmLastStudentLocation) { targetLoc = pmLastStudentLocation; triggerRadius = 100; }
-                           else if (endStopLocation) { targetLoc = endStopLocation; triggerRadius = 100; } }
+                
+                // 3. LAST EVENING (School -> Home)
+                else if (currentRouteType === 'last_evening') {
+                    if (pmLastStudentLocation) {
+                        targetLoc = pmLastStudentLocation; // Last Kid
+                        triggerRadius = 100; // Strict
+                    } else if (endStopLocation) {
+                        targetLoc = endStopLocation; 
+                        triggerRadius = 100;
+                    }
+                }
+                
+                // 4. GENERIC FALLBACK
+                else {
+                    if (currentShift === 'AM') {
+                         if (endStopLocation) { targetLoc = endStopLocation; triggerRadius = 300; }
+                    } else {
+                         if (pmLastStudentLocation) { targetLoc = pmLastStudentLocation; triggerRadius = 100; }
+                         else if (endStopLocation) { targetLoc = endStopLocation; triggerRadius = 100; }
+                    }
                 }
 
+                // Execute Check
                 if (targetLoc && canTrigger) {
                     const t = new google.maps.LatLng(targetLoc.lat, targetLoc.lng);
                     const dist = google.maps.geometry.spherical.computeDistanceBetween(myLocObj, t);
-                    // console.log("🏁 Dist to End:", dist); // Debugging
+                    
                     if (dist < triggerRadius) {
                         hasTriggeredArrival = true;
-                        console.log("🏁 Arrival Triggered!");
                         sendToFlutter({ action: 'arrivedAtEnd' });
                     }
                 }
             }
-        }, (err) => { console.warn(`⚠️ GPS Error: ${err.message}`); }, options);
+
+        }, (err) => {
+            console.warn(`⚠️ GPS Error (${err.code}): ${err.message}`);
+            if (err.code === 2 || err.code === 3) {
+                console.log("🔄 Connection lost. Restarting GPS tracking in 2 seconds...");
+                setTimeout(startLocationTracking, 2000);
+            }
+        }, options);
     }
 
     window.addEventListener("message", function (event) {
@@ -284,11 +378,15 @@
 
     window.setRouteData = function(stops, shift, routeType) {
       const alertedStudentIds = new Set();
-      if (window.routeMarkers) window.routeMarkers.forEach(m => { if (m.hasTriggeredApproach) m.items.forEach(s => alertedStudentIds.add(s.id)); });
+      if (window.routeMarkers) {
+          window.routeMarkers.forEach(m => {
+              if (m.hasTriggeredApproach) m.items.forEach(s => alertedStudentIds.add(s.id));
+          });
+      }
       
       currentShift = shift; 
-      currentRouteType = routeType;
-      console.log("🚦 Route Type:", currentRouteType);
+      currentRouteType = routeType; 
+      console.log("🚦 Route Type Set To:", currentRouteType);
 
       window.routeMarkers.forEach(obj => obj.marker.map = null);
       window.routeMarkers = [];
@@ -296,8 +394,8 @@
       document.getElementById("route-summary").style.display = "none";
       const bounds = new google.maps.LatLngBounds();
       const clusters = groupCloseLocations(stops, 15);
+      const isPM = (currentShift === 'PM');
       
-      // Reset
       startStopLocation = null;
       endStopLocation = null;
       pmLastStudentLocation = null;
@@ -316,29 +414,50 @@
       };
 
       let validStopCounter = 0; 
+
       clusters.forEach((cluster) => {
           const pos = { lat: cluster.lat, lng: cluster.lng };
           bounds.extend(pos);
-          let color = "#1a73e8"; let text = ""; let header = "نقطة تجمع";
+          
+          // 🔥 FIXED: Capture coordinates independently from visual priority
+          if (cluster.isStart) startStopLocation = pos;
+          if (cluster.isEnd) endStopLocation = pos;
 
-          if (cluster.isExcluded) { color = "#757575"; text = "X"; }
-          else if (cluster.isStart) { color = "#00c853"; text = "S"; header = "نقطة البداية"; startStopLocation = pos; }
-          else if (cluster.isEnd) { color = "#d50000"; text = "E"; header = "نقطة النهاية"; endStopLocation = pos; }
-          else if (cluster.stopType === 'assistant') { color = "#9C27B0"; text = "A"; header = "المرافق"; }
+          let color = "#1a73e8"; 
+          let text = ""; 
+          let header = "نقطة تجمع";
+
+          // Visual Logic
+          if (cluster.isExcluded) { 
+              color = "#757575"; 
+              text = "X"; 
+          }
+          else if (cluster.isStart) { 
+              color = "#00c853"; text = "S"; header = "نقطة البداية"; 
+          }
+          else if (cluster.isEnd) { 
+              color = "#d50000"; text = "E"; header = "نقطة النهاية"; 
+          }
+          else if (cluster.stopType === 'assistant') { 
+              color = "#9C27B0"; text = "A"; header = "المرافق"; 
+          }
           else {
-             validStopCounter++; text = validStopCounter.toString();
+             validStopCounter++; 
+             text = validStopCounter.toString();
              const activeStudents = cluster.items.filter(s => s.type === 'student' && !s.isExcluded);
              const anyPending = activeStudents.some(s => s.status === 'pending');
              if (activeStudents.length > 0 && anyPending) color = "#d32f2f"; else color = "#388e3c"; 
           }
+
           let rows = cluster.items.map(s => {
               if (s.type === 'assistant') return `<div style="margin-bottom:6px; border-bottom:1px solid #eee; padding-bottom:4px;"><b>${s.name || 'مرافق'}</b></div>`;
-              let badgeColor = 'bg-red'; let statusTxt = (currentShift === 'PM') ? 'لم يتم التنزيل' : 'لم يتم التحميل'; 
+              let badgeColor = 'bg-red'; let statusTxt = isPM ? 'لم يتم التنزيل' : 'لم يتم التحميل'; 
               if (s.status === 'picked') { badgeColor = 'bg-green'; statusTxt = 'تم التحميل'; }
               else if (s.status === 'dropped') { badgeColor = 'bg-green'; statusTxt = 'تم التنزيل'; }
               else if (s.isExcluded) { badgeColor = 'bg-gray'; statusTxt = 'مستبعد'; }
               return `<div style="margin-bottom:6px; border-bottom:1px solid #eee; padding-bottom:4px;"><span class="status-badge ${badgeColor}">${statusTxt}</span><b>${s.name || 'طالب'}</b><br><span style="font-size:12px; color:#555;">${s.grade || ''}</span></div>`;
           }).join('');
+          
           let html = `<div style="color:black;text-align:right;direction:rtl;min-width:180px;"><b style="color:${color}; font-size:14px;">${header}</b><hr>${rows}</div>`;
           addMarker(cluster, color, text, html);
       });
@@ -366,16 +485,25 @@
            if (status === "OK") {
                directionsRenderer.setDirections(result);
                const orderIndices = result.routes[0].waypoint_order;
-               let orderedIds = []; let visualCounter = 1;
+               let orderedIds = [];
+               let visualCounter = 1;
+
                orderedIds.push(startPoint.items[0].id);
                orderIndices.forEach(idx => {
                    const cluster = [...assistants, ...students][idx];
                    cluster.items.forEach(item => orderedIds.push(item.id));
-                   const markerObj = window.routeMarkers.find(m => Math.abs(m.lat - cluster.lat) < 0.00001 && Math.abs(m.lng - cluster.lng) < 0.00001);
-                   if (markerObj && markerObj.pin) markerObj.pin.glyphText = visualCounter.toString();
+                   
+                   const markerObj = window.routeMarkers.find(m => 
+                       Math.abs(m.lat - cluster.lat) < 0.00001 && 
+                       Math.abs(m.lng - cluster.lng) < 0.00001
+                   );
+                   if (markerObj && markerObj.pin) {
+                       markerObj.pin.glyphText = visualCounter.toString();
+                   }
                    visualCounter++;
                });
                orderedIds.push(endPoint.items[0].id);
+
                if (currentShift === 'PM' && orderIndices.length > 0) {
                    const lastIndex = orderIndices[orderIndices.length - 1];
                    const lastCluster = [...assistants, ...students][lastIndex];
