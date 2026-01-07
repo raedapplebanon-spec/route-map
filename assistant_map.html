@@ -321,7 +321,9 @@
       }
     });
 
+    // 🔥 MODIFIED: Color Logic fixes Mixed (Active + Excluded) Stops
     window.setRouteData = function(stops, shift) {
+      // 1. MEMORY SAVE
       const alertedStudentIds = new Set();
       if (window.routeMarkers) {
           window.routeMarkers.forEach(m => {
@@ -333,9 +335,11 @@
       window.routeMarkers = [];
       directionsRenderer.setDirections({ routes: [] });
       document.getElementById("route-summary").style.display = "none";
+      
       const bounds = new google.maps.LatLngBounds();
       const clusters = groupCloseLocations(stops, 15);
       const isPM = (currentShift === 'PM');
+      
       endStopLocation = null;
       pmLastStudentLocation = null;
       hasTriggeredArrival = false; 
@@ -355,14 +359,27 @@
           const pos = { lat: cluster.lat, lng: cluster.lng };
           bounds.extend(pos);
           let color = "#1a73e8"; let text = cluster.items.length.toString(); let header = "نقطة تجمع";
+          
           if (cluster.isStart) { color = "#00c853"; text = "S"; header = "نقطة البداية"; }
           else if (cluster.isEnd) { color = "#d50000"; text = "E"; header = "نقطة النهاية"; endStopLocation = pos; }
           else if (cluster.stopType === 'assistant') { color = "#9C27B0"; text = "A"; header = "المرافق"; }
-          else if (cluster.isExcluded) { color = "#757575"; }
+          else if (cluster.isExcluded) { 
+              color = "#757575"; // Fully excluded stop
+          } 
           else {
-             const allDone = cluster.items.every(s => s.status === 'picked' || s.status === 'dropped');
-             if (allDone) color = "#388e3c"; else color = "#d32f2f"; 
+             // 🔥 FIX: Ignore excluded students when checking if "All Done"
+             const activeItems = cluster.items.filter(s => !s.isExcluded);
+             
+             // Check if all ACTIVE items are picked/dropped
+             const allDone = activeItems.length > 0 && activeItems.every(s => s.status === 'picked' || s.status === 'dropped');
+             
+             if (allDone) {
+                 color = "#388e3c"; // Green (Done)
+             } else {
+                 color = "#d32f2f"; // Red (Pending)
+             }
           }
+
           let rows = cluster.items.map(s => {
               if (s.type === 'assistant') return `<div style="margin-bottom:6px; border-bottom:1px solid #eee; padding-bottom:4px;"><b>${s.name || 'مرافق'}</b></div>`;
               let badgeColor = 'bg-red'; let statusTxt = isPM ? 'لم يتم التنزيل' : 'لم يتم التحميل'; 
@@ -371,6 +388,7 @@
               else if (s.isExcluded) { badgeColor = 'bg-gray'; statusTxt = 'مستبعد'; }
               return `<div style="margin-bottom:6px; border-bottom:1px solid #eee; padding-bottom:4px;"><span class="status-badge ${badgeColor}">${statusTxt}</span><b>${s.name || 'طالب'}</b><br><span style="font-size:12px; color:#555;">${s.grade || ''}</span></div>`;
           }).join('');
+          
           let html = `<div style="color:black;text-align:right;direction:rtl;min-width:180px;"><b style="color:${color}; font-size:14px;">${header}</b><hr>${rows}</div>`;
           addMarker(cluster, color, text, html);
       });
@@ -378,7 +396,6 @@
       if (clusters.length >= 2) calculateRoadRoute(clusters);
       if (!isBusTrackingActive && !bounds.isEmpty()) map.fitBounds(bounds);
     };
-
     function calculateRoadRoute(clusters) {
        const startPoint = clusters.find(c => c.isStart);
        const endPoint = clusters.find(c => c.isEnd);
