@@ -223,7 +223,7 @@
             map.panTo(myLoc); 
             isBusTrackingActive = true;
 
-            // 🔥 3. SMART LOOK-AHEAD RADAR
+            // 🔥 3. SMART LOOK-AHEAD RADAR (Corrected Logic)
             if (window.orderedStopIds && window.orderedStopIds.length > 0) {
                 let firstPendingIndex = -1;
                 
@@ -233,15 +233,17 @@
                     
                     if (markerObj) {
                         const isPending = markerObj.items.some(s => {
-                            // 1. Basic Filters
+                            // 1. Always skip these:
                             if (s.isExcluded || s.isStart || s.type === 'assistant') return false;
 
-                            // 🔥 2. SHIFT SPECIFIC LOGIC (THE FIX)
+                            // 2. Logic based on Shift:
                             if (currentShift === 'AM') {
-                                // AM: We are pending if NOT Picked (and not dropped)
-                                return s.status !== 'picked' && s.status !== 'dropped';
+                                // AM: Alert if student is 'pending' (Waiting on street)
+                                // If 'picked', they are on bus -> Done.
+                                return s.status === 'pending';
                             } else {
-                                // PM: We are pending if NOT Dropped (Ignore 'picked' because they are ON the bus)
+                                // PM: Alert if student is 'pending' or 'picked' (Waiting on bus)
+                                // Only stop alerting when they are 'dropped' (At home).
                                 return s.status !== 'dropped';
                             }
                         });
