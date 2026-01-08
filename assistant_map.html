@@ -45,6 +45,8 @@
   <script>
     // --- Globals ---
     window.routeMarkers = [];
+    
+    // 🔒 LOCK 1: Prevents Student Alert Spam
     window.alertedStudentIds = new Set(); 
     
     let map, directionsService, directionsRenderer, infoWindow;
@@ -57,10 +59,11 @@
     let endStopLocation = null; 
     let pmLastStudentLocation = null; 
     
+    // 🔒 LOCK 2: Prevents Arrival Spam
     let hasTriggeredArrival = false;
     let hasLeftStartZone = false; 
 
-    // Helper to detect route changes
+    // 🔒 LOCK 3: Signature to detect New Route vs Update
     let lastRouteSignature = ""; 
 
     let userLocationMarker = null;
@@ -258,13 +261,11 @@
                 }
 
                 // B. Scan SEQUENTIALLY from Cursor.
-                // Stop scanning as soon as we hit a stop that is NOT close.
-                // This allows 2,3,4 (Batch) but stops before 6 (Far away).
                 if (firstPendingIndex !== -1) {
                     let batchIds = [];
                     let batchNames = [];
                     
-                    // Look ahead a maximum of 5 stops to prevent infinite scanning in weird cases
+                    // Look ahead max 5 stops
                     for (let k = 0; k < 5; k++) {
                         const targetIndex = firstPendingIndex + k;
                         if (targetIndex >= window.orderedStopIds.length) break;
@@ -293,8 +294,7 @@
                                     console.log("➕ Adding to batch: " + namesAtThisStop);
                                 }
                             } else {
-                                // 🛑 FAR: Break the loop immediately!
-                                // We reached the "gap" in the route. Do not jump over it.
+                                // 🛑 FAR: Break loop. Sequential order broken.
                                 break; 
                             }
                         }
@@ -309,7 +309,7 @@
             }
 
             // ---------------------------------------------
-            // 🔥 4. CHECK FINAL ARRIVAL
+            // 🔥 4. CHECK FINAL ARRIVAL (LOCKED)
             // ---------------------------------------------
             
             if (currentRouteType === 'midday' && !hasLeftStartZone && startStopLocation) {
@@ -322,7 +322,7 @@
                 }
             }
 
-            if (!hasTriggeredArrival) {
+            if (!hasTriggeredArrival) { // <--- LOCK CHECK
                 let targetLoc = null;
                 let triggerRadius = 50; 
                 let canTrigger = true;
@@ -351,7 +351,8 @@
                     const dist = google.maps.geometry.spherical.computeDistanceBetween(myLocObj, t);
                     
                     if (dist < triggerRadius) {
-                        hasTriggeredArrival = true;
+                        hasTriggeredArrival = true; // <--- LOCK ENGAGED
+                        console.log("🏁 Arrival Triggered!");
                         sendToFlutter({ action: 'arrivedAtEnd' });
                     }
                 }
@@ -385,7 +386,7 @@
       if (newSignature !== lastRouteSignature) {
           console.log("🔄 New Route Detected. Resetting Locks.");
           window.alertedStudentIds.clear();
-          hasTriggeredArrival = false;
+          hasTriggeredArrival = false; // <--- LOCK RESET ONLY ON NEW ROUTE
           hasLeftStartZone = false;
           lastRouteSignature = newSignature;
       } else {
