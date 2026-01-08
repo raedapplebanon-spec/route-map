@@ -26,7 +26,7 @@
     <div class="legend-row"><div class="legend-color" style="background:#00c853"></div><span>البداية</span></div>
     <div class="legend-row"><div class="legend-color" style="background:#d50000"></div><span>النهاية</span></div>
     <div class="legend-row"><div class="legend-color" style="background:#1a73e8"></div><span>ضمن الجولة</span></div>
-    <div class="legend-row"><div style="width: 14px; margin-left: 6px; text-align: center;">⚠️</div><span>يتطلب مشي</span></div>
+    <div class="legend-row"><div style="width: 14px; margin-left: 6px; text-align: center;">⚠️</div><span>يتطلب مشي > ٣٠م</span></div>
     <div class="legend-row"><div class="legend-color" style="background:#ff9100"></div><span>خارج الجولة</span></div>
   </div>
 
@@ -51,7 +51,7 @@
     const MY_MAP_ID = "48c2bb983bd19c1c44d95cb7";
     
     // 🔥 CONFIG: Warning Threshold (Meters)
-    const SNAP_THRESHOLD = 40; 
+    const SNAP_THRESHOLD = 30; 
 
     function haversineDistance(lat1, lng1, lat2, lng2) {
       const R = 6371e3; 
@@ -351,5 +351,6 @@
   </script>
 </body>
 </html>
+
 
 
