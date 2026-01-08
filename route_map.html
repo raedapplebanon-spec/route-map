@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+  <!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
   <meta charset="UTF-8" />
@@ -14,7 +14,7 @@
     .legend-row { display: flex; align-items: center; margin-bottom: 6px; }
     .legend-color { width: 14px; height: 14px; border-radius: 50%; margin-left: 6px; }
     /* Warning Badge Style */
-    .warn-badge { background: #d32f2f; color: white; padding: 2px 6px; border-radius: 4px; font-size: 11px; margin-right: 5px; }
+    .warn-badge { background: #ff9800; color: white; padding: 2px 6px; border-radius: 4px; font-size: 11px; margin-right: 5px; }
   </style>
 
   <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCYaJ4Gjq36mq8swYgjNXOYr5mKZi45niA&callback=initMap&libraries=marker,places,geometry&loading=async&v=weekly" async defer></script>
@@ -27,7 +27,7 @@
     <div class="legend-row"><div class="legend-color" style="background:#00c853"></div><span>البداية</span></div>
     <div class="legend-row"><div class="legend-color" style="background:#d50000"></div><span>النهاية</span></div>
     <div class="legend-row"><div class="legend-color" style="background:#1a73e8"></div><span>آمن (Safe)</span></div>
-    <div class="legend-row"><div class="legend-color" style="background:#d32f2f"></div><span>يتطلب المشي (Warning)</span></div>
+    <div class="legend-row"><div class="legend-color" style="background:#ff9800"></div><span>يتطلب المشي (Warning)</span></div>
   </div>
 
   <div id="route-summary" class="route-summary" style="display: none;">
@@ -41,7 +41,7 @@
     // --- Globals ---
     window.routeMarkers = [];
     window.availableMarkers = [];
-    window.walkLines = []; 
+    window.walkLines = []; // Store dotted lines to clear them later
     
     let map, directionsService, directionsRenderer, infoWindow;
     let mapReady = false;
@@ -168,7 +168,7 @@
     window.setRouteData = function(routeArray, availableArray) {
       window.routeMarkers.forEach(obj => obj.marker.map = null);
       window.availableMarkers.forEach(obj => obj.marker.map = null);
-      window.walkLines.forEach(line => line.setMap(null)); 
+      window.walkLines.forEach(line => line.setMap(null)); // Clear walk lines
       
       window.routeMarkers = [];
       window.availableMarkers = [];
@@ -189,7 +189,7 @@
       const routeClusters = groupCloseLocations(routeArray);
       const availableClusters = groupCloseLocations(availableArray);
 
-      // Render Route Markers
+      // Render Route Markers (Initially Standard Colors)
       routeClusters.forEach(cluster => {
         const pos = { lat: cluster.lat, lng: cluster.lng };
         bounds.extend(pos);
@@ -225,6 +225,7 @@
        const assistants = clusters.filter(c => c.stopType === 'assistant');
        const studentStops = clusters.filter(c => c !== startPoint && c !== endPoint && c.stopType !== 'assistant');
        
+       // Calculate Optimized Route First
        let waypoints = [
            ...assistants.map(a => ({ location: {lat: a.lat, lng: a.lng}, stopover: true })),
            ...studentStops.map(s => ({ location: {lat: s.lat, lng: s.lng}, stopover: true }))
@@ -237,8 +238,10 @@
        }, (result, status) => {
            if (status === "OK") {
                const optimizedOrder = result.routes[0].waypoint_order;
+               
                // Re-order the waypoints based on Google's result
                const finalWaypoints = optimizedOrder.map(index => waypoints[index]);
+               
                // Now Render the Final Route AND Check Accessibility
                renderFinalRoute(startPoint, endPoint, finalWaypoints);
            }
@@ -256,9 +259,18 @@
         if (status === "OK") {
             directionsRenderer.setDirections(result);
             const legs = result.routes[0].legs; 
+            
+            // Loop through legs to find Snapped Locations
+            // Leg 0: Start -> Waypoint 1
+            // Leg 1: Waypoint 1 -> Waypoint 2
+            // ...
+            // The "End Location" of Leg X is the Snapped Location of Waypoint X+1 (roughly)
+            
             let visualCounter = 1;
 
             waypoints.forEach((wp, index) => {
+                // The API result legs match the waypoint sequence.
+                // legs[0] ends at the first waypoint.
                 const legIndex = index; 
                 if (legIndex >= legs.length) return;
 
@@ -273,6 +285,7 @@
 
                 if (markerObj && markerObj.pin) {
                     // 1. UPDATE NUMBER
+                    // Only number students (not assistants)
                     const isAssistant = markerObj.html.includes("المساعد");
                     if (!isAssistant) {
                         markerObj.pin.glyphText = visualCounter.toString();
@@ -288,11 +301,9 @@
                     if (distance > SNAP_THRESHOLD) {
                         console.warn(`⚠️ Warning: Stop ${visualCounter-1} is ${Math.round(distance)}m from the road.`);
                         
-                        // 🔥 UPDATED: RED STYLE + WARNING ICON
-                        markerObj.pin.background = "#d32f2f"; // Red
-                        markerObj.pin.borderColor = "#b71c1c";
-                        markerObj.pin.glyphText = "⚠️"; 
-                        markerObj.pin.glyphColor = "white";
+                        // A. Visual Warning on Pin
+                        markerObj.pin.background = "#ff9800"; // Orange
+                        markerObj.pin.glyphText = "!"; // Warning Icon
                         
                         // B. Draw Dotted Walk Line
                         const walkLine = new google.maps.Polyline({
@@ -307,7 +318,7 @@
                         window.walkLines.push(walkLine);
 
                         // C. Update Info Window
-                        let warningHtml = `<div style="background:#ffebee; color:#c62828; padding:5px; border-radius:4px; margin-bottom:5px; font-size:12px; border:1px solid #ef9a9a;">⚠️ <b>تنبيه:</b> الحافلة تتوقف على بعد ${Math.round(distance)}م</div>`;
+                        let warningHtml = `<div style="background:#fff3e0; color:#e65100; padding:5px; border-radius:4px; margin-bottom:5px; font-size:12px;">⚠️ <b>تنبيه:</b> الحافلة تتوقف على بعد ${Math.round(distance)}م</div>`;
                         markerObj.html = markerObj.html.replace('<hr>', `<hr>${warningHtml}`);
                     }
                 }
