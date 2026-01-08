@@ -13,7 +13,6 @@
     .legend { display: none; background: rgba(255, 255, 255, 0.95); padding: 10px 14px; border-radius: 8px; font-size: 12px; box-shadow: 0 2px 6px rgba(0,0,0,0.25); margin-bottom: 25px; margin-right: 10px; min-width: 140px; }
     .legend-row { display: flex; align-items: center; margin-bottom: 6px; }
     .legend-color { width: 14px; height: 14px; border-radius: 50%; margin-left: 6px; }
-    /* Warning Badge Style */
     .warn-badge { background: #ff9800; color: white; padding: 2px 6px; border-radius: 4px; font-size: 11px; margin-right: 5px; }
   </style>
 
@@ -47,7 +46,7 @@
     let mapReady = false;
     const MY_MAP_ID = "48c2bb983bd19c1c44d95cb7";
     
-    // 🔥 CONFIG: Threshold in Meters
+    // 🔥 CONFIG: Warning Threshold (Meters)
     const SNAP_THRESHOLD = 40; 
 
     function haversineDistance(lat1, lng1, lat2, lng2) {
@@ -168,7 +167,7 @@
     window.setRouteData = function(routeArray, availableArray) {
       window.routeMarkers.forEach(obj => obj.marker.map = null);
       window.availableMarkers.forEach(obj => obj.marker.map = null);
-      window.walkLines.forEach(line => line.setMap(null)); // Clear walk lines
+      window.walkLines.forEach(line => line.setMap(null)); 
       
       window.routeMarkers = [];
       window.availableMarkers = [];
@@ -189,7 +188,7 @@
       const routeClusters = groupCloseLocations(routeArray);
       const availableClusters = groupCloseLocations(availableArray);
 
-      // Render Route Markers (Initially Standard Colors)
+      // Render Route Markers
       routeClusters.forEach(cluster => {
         const pos = { lat: cluster.lat, lng: cluster.lng };
         bounds.extend(pos);
@@ -225,7 +224,6 @@
        const assistants = clusters.filter(c => c.stopType === 'assistant');
        const studentStops = clusters.filter(c => c !== startPoint && c !== endPoint && c.stopType !== 'assistant');
        
-       // Calculate Optimized Route First
        let waypoints = [
            ...assistants.map(a => ({ location: {lat: a.lat, lng: a.lng}, stopover: true })),
            ...studentStops.map(s => ({ location: {lat: s.lat, lng: s.lng}, stopover: true }))
@@ -238,11 +236,9 @@
        }, (result, status) => {
            if (status === "OK") {
                const optimizedOrder = result.routes[0].waypoint_order;
-               
                // Re-order the waypoints based on Google's result
                const finalWaypoints = optimizedOrder.map(index => waypoints[index]);
-               
-               // Now Render the Final Route AND Check Accessibility
+               // Render Final Route AND Check Accessibility
                renderFinalRoute(startPoint, endPoint, finalWaypoints);
            }
        });
@@ -261,16 +257,11 @@
             const legs = result.routes[0].legs; 
             
             // Loop through legs to find Snapped Locations
-            // Leg 0: Start -> Waypoint 1
-            // Leg 1: Waypoint 1 -> Waypoint 2
-            // ...
-            // The "End Location" of Leg X is the Snapped Location of Waypoint X+1 (roughly)
+            // legs[0] ends at the first waypoint
             
             let visualCounter = 1;
 
             waypoints.forEach((wp, index) => {
-                // The API result legs match the waypoint sequence.
-                // legs[0] ends at the first waypoint.
                 const legIndex = index; 
                 if (legIndex >= legs.length) return;
 
@@ -285,14 +276,13 @@
 
                 if (markerObj && markerObj.pin) {
                     // 1. UPDATE NUMBER
-                    // Only number students (not assistants)
                     const isAssistant = markerObj.html.includes("المساعد");
                     if (!isAssistant) {
                         markerObj.pin.glyphText = visualCounter.toString();
                         visualCounter++;
                     }
 
-                    // 2. 🔥 CHECK ACCESSIBILITY (The Magic)
+                    // 2. 🔥 CHECK ACCESSIBILITY
                     const distance = google.maps.geometry.spherical.computeDistanceBetween(
                         new google.maps.LatLng(originalLoc.lat, originalLoc.lng),
                         snappedLoc
@@ -303,7 +293,9 @@
                         
                         // A. Visual Warning on Pin
                         markerObj.pin.background = "#ff9800"; // Orange
-                        markerObj.pin.glyphText = "!"; // Warning Icon
+                        markerObj.pin.borderColor = "#e65100";
+                        markerObj.pin.glyphText = "⚠️"; // The requested warning icon
+                        markerObj.pin.glyphColor = "white";
                         
                         // B. Draw Dotted Walk Line
                         const walkLine = new google.maps.Polyline({
