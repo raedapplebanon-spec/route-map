@@ -45,19 +45,25 @@
   <script>
     // --- Globals ---
     window.routeMarkers = [];
+    
+    // 🔥 NEW: Permanent Memory to prevent spam
+    window.alertedStudentIds = new Set(); 
+    
     let map, directionsService, directionsRenderer, infoWindow;
     let mapReady = false;
     let currentShift = "AM"; 
-    
-    // Route Type Flag (first_morning, midday, last_evening)
     let currentRouteType = "first_morning"; 
 
+    // State Logic
     let startStopLocation = null; 
     let endStopLocation = null; 
     let pmLastStudentLocation = null; 
     
     let hasTriggeredArrival = false;
     let hasLeftStartZone = false; 
+
+    // Helper to detect route changes
+    let lastRouteSignature = ""; 
 
     let userLocationMarker = null;
     let radarCircle = null;
@@ -231,7 +237,9 @@
             map.panTo(myLoc); 
             isBusTrackingActive = true;
 
-            // 🔥 3. SMART LOOK-AHEAD RADAR (STRICT FILTER)
+            // ---------------------------------------------
+            // 🔥 3. SMART LOOK-AHEAD RADAR (MEMORY PROTECTED)
+            // ---------------------------------------------
             if (window.orderedStopIds && window.orderedStopIds.length > 0) {
                 let firstPendingIndex = -1;
                 
@@ -243,7 +251,8 @@
                         const isPending = markerObj.items.some(s => 
                             s.type === 'student' && 
                             s.status === 'pending' && 
-                            !s.isExcluded
+                            !s.isExcluded &&
+                            !window.alertedStudentIds.has(s.id) // ✅ CHECK MEMORY
                         );
                         if (isPending) { firstPendingIndex = i; break; }
                     }
@@ -259,16 +268,22 @@
                         const targetId = window.orderedStopIds[targetIndex];
                         const targetMarker = window.routeMarkers.find(m => m.items.some(item => item.id === targetId));
                         
-                        if (targetMarker && !targetMarker.hasTriggeredApproach) {
+                        if (targetMarker) {
                             const stopLoc = new google.maps.LatLng(targetMarker.lat, targetMarker.lng);
                             const distToStop = google.maps.geometry.spherical.computeDistanceBetween(myLocObj, stopLoc);
                             
                             if (distToStop < APPROACH_RADIUS) {
-                                targetMarker.hasTriggeredApproach = true;
+                                // 🔥 FILTER: Only Pending + Not Excluded + Not Previously Alerted
                                 const activeStudents = targetMarker.items.filter(s => 
-                                    s.type === 'student' && s.status === 'pending' && !s.isExcluded
+                                    s.type === 'student' && 
+                                    s.status === 'pending' && 
+                                    !s.isExcluded &&
+                                    !window.alertedStudentIds.has(s.id)
                                 );
+                                
                                 if (activeStudents.length > 0) {
+                                    activeStudents.forEach(s => window.alertedStudentIds.add(s.id)); // ✅ ADD TO MEMORY
+                                    
                                     batchIds.push(...activeStudents.map(i => i.id));
                                     const namesAtThisStop = activeStudents.map(s => s.name).join(" & ");
                                     batchNames.push(namesAtThisStop);
@@ -285,64 +300,45 @@
                 }
             }
 
-            // 🔥 4. CHECK FINAL ARRIVAL
+            // ---------------------------------------------
+            // 🔥 4. CHECK FINAL ARRIVAL (LATCH PROTECTED)
+            // ---------------------------------------------
             
-            // Step A: Handle "Leaving Zone" Latch for Midday
             if (currentRouteType === 'midday' && !hasLeftStartZone && startStopLocation) {
                 const startLocObj = new google.maps.LatLng(startStopLocation.lat, startStopLocation.lng);
                 const distFromStart = google.maps.geometry.spherical.computeDistanceBetween(myLocObj, startLocObj);
                 
-                if (distFromStart > 500) { // Must drive 500m away to arm the system
+                if (distFromStart > 500) { 
                     hasLeftStartZone = true;
                     console.log("🔓 Bus has left the school zone. Arrival detection armed.");
                 }
             }
 
-            // Step B: Check Arrival
             if (!hasTriggeredArrival) {
                 let targetLoc = null;
                 let triggerRadius = 50; 
                 let canTrigger = true;
 
-                // 1. FIRST MORNING (Home -> School)
                 if (currentRouteType === 'first_morning') {
-                    if (endStopLocation) {
-                        targetLoc = endStopLocation; // School
-                        triggerRadius = 300; 
-                    }
+                    if (endStopLocation) { targetLoc = endStopLocation; triggerRadius = 300; }
                 }
-                
-                // 2. MIDDAY (School -> School)
                 else if (currentRouteType === 'midday') {
                     if (endStopLocation) {
-                        targetLoc = endStopLocation; // School
+                        targetLoc = endStopLocation; 
                         triggerRadius = 300;
                         if (!hasLeftStartZone) canTrigger = false; 
                     }
                 }
-                
-                // 3. LAST EVENING (School -> Home)
                 else if (currentRouteType === 'last_evening') {
-                    if (pmLastStudentLocation) {
-                        targetLoc = pmLastStudentLocation; // Last Kid
-                        triggerRadius = 100; // Strict
-                    } else if (endStopLocation) {
-                        targetLoc = endStopLocation; 
-                        triggerRadius = 100;
-                    }
+                    if (pmLastStudentLocation) { targetLoc = pmLastStudentLocation; triggerRadius = 100; } 
+                    else if (endStopLocation) { targetLoc = endStopLocation; triggerRadius = 100; }
                 }
-                
-                // 4. GENERIC FALLBACK
                 else {
-                    if (currentShift === 'AM') {
-                         if (endStopLocation) { targetLoc = endStopLocation; triggerRadius = 300; }
-                    } else {
-                         if (pmLastStudentLocation) { targetLoc = pmLastStudentLocation; triggerRadius = 100; }
-                         else if (endStopLocation) { targetLoc = endStopLocation; triggerRadius = 100; }
-                    }
+                    // Fallback
+                    if (currentShift === 'AM' && endStopLocation) { targetLoc = endStopLocation; triggerRadius = 300; }
+                    else if (endStopLocation) { targetLoc = endStopLocation; triggerRadius = 100; }
                 }
 
-                // Execute Check
                 if (targetLoc && canTrigger) {
                     const t = new google.maps.LatLng(targetLoc.lat, targetLoc.lng);
                     const dist = google.maps.geometry.spherical.computeDistanceBetween(myLocObj, t);
@@ -377,16 +373,24 @@
     });
 
     window.setRouteData = function(stops, shift, routeType) {
-      const alertedStudentIds = new Set();
-      if (window.routeMarkers) {
-          window.routeMarkers.forEach(m => {
-              if (m.hasTriggeredApproach) m.items.forEach(s => alertedStudentIds.add(s.id));
-          });
-      }
+      // 🔥 CHECK SIGNATURE: Detect if this is a new route or just an update
+      // We assume Start/End ID match means it's the same route trip.
+      const newSignature = shift + "_" + routeType + "_" + (stops.length > 0 ? stops[0].id : "");
       
+      if (newSignature !== lastRouteSignature) {
+          // New Route! Reset Everything.
+          console.log("🔄 New Route Detected. Resetting Locks.");
+          window.alertedStudentIds.clear();
+          hasTriggeredArrival = false;
+          hasLeftStartZone = false;
+          lastRouteSignature = newSignature;
+      } else {
+          console.log("🔄 Route Update. Preserving Locks.");
+          // Do NOT reset hasTriggeredArrival or alertedStudentIds
+      }
+
       currentShift = shift; 
       currentRouteType = routeType; 
-      console.log("🚦 Route Type Set To:", currentRouteType);
 
       window.routeMarkers.forEach(obj => obj.marker.map = null);
       window.routeMarkers = [];
@@ -394,19 +398,19 @@
       document.getElementById("route-summary").style.display = "none";
       const bounds = new google.maps.LatLngBounds();
       const clusters = groupCloseLocations(stops, 15);
-      const isPM = (currentShift === 'PM');
       
       startStopLocation = null;
       endStopLocation = null;
       pmLastStudentLocation = null;
-      hasTriggeredArrival = false; 
-      hasLeftStartZone = false; 
 
       const addMarker = (cluster, color, text, html) => {
          const pin = new google.maps.marker.PinElement({ background: color, borderColor: "#FFFFFF", glyphColor: "#FFFFFF", glyphText: text });
          const marker = new google.maps.marker.AdvancedMarkerElement({ map: map, position: { lat: cluster.lat, lng: cluster.lng }, content: pin.element });
          marker.addListener("click", () => { infoWindow.setContent(html); infoWindow.open(map, marker); });
-         const isAlreadyTriggered = cluster.items.some(s => alertedStudentIds.has(s.id));
+         
+         // Visual Trigger State (Optional, mostly for debug now since we use Global Set)
+         const isAlreadyTriggered = cluster.items.some(s => window.alertedStudentIds.has(s.id));
+         
          window.routeMarkers.push({
              marker, pin, names: cluster.items.map(i => i.name || ""), html, lat: cluster.lat, lng: cluster.lng,
              isStart: cluster.isStart, isEnd: cluster.isEnd, items: cluster.items, hasTriggeredApproach: isAlreadyTriggered 
@@ -419,7 +423,6 @@
           const pos = { lat: cluster.lat, lng: cluster.lng };
           bounds.extend(pos);
           
-          // 🔥 FIXED: Capture coordinates independently from visual priority
           if (cluster.isStart) startStopLocation = pos;
           if (cluster.isEnd) endStopLocation = pos;
 
@@ -427,10 +430,8 @@
           let text = ""; 
           let header = "نقطة تجمع";
 
-          // Visual Logic
           if (cluster.isExcluded) { 
-              color = "#757575"; 
-              text = "X"; 
+              color = "#757575"; text = "X"; 
           }
           else if (cluster.isStart) { 
               color = "#00c853"; text = "S"; header = "نقطة البداية"; 
@@ -451,7 +452,7 @@
 
           let rows = cluster.items.map(s => {
               if (s.type === 'assistant') return `<div style="margin-bottom:6px; border-bottom:1px solid #eee; padding-bottom:4px;"><b>${s.name || 'مرافق'}</b></div>`;
-              let badgeColor = 'bg-red'; let statusTxt = isPM ? 'لم يتم التنزيل' : 'لم يتم التحميل'; 
+              let badgeColor = 'bg-red'; let statusTxt = (currentShift === 'PM') ? 'لم يتم التنزيل' : 'لم يتم التحميل'; 
               if (s.status === 'picked') { badgeColor = 'bg-green'; statusTxt = 'تم التحميل'; }
               else if (s.status === 'dropped') { badgeColor = 'bg-green'; statusTxt = 'تم التنزيل'; }
               else if (s.isExcluded) { badgeColor = 'bg-gray'; statusTxt = 'مستبعد'; }
