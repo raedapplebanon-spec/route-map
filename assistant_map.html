@@ -45,8 +45,6 @@
   <script>
     // --- Globals ---
     window.routeMarkers = [];
-    
-    // 🔥 NEW: Permanent Memory to prevent spam
     window.alertedStudentIds = new Set(); 
     
     let map, directionsService, directionsRenderer, infoWindow;
@@ -238,11 +236,12 @@
             isBusTrackingActive = true;
 
             // ---------------------------------------------
-            // 🔥 3. SMART LOOK-AHEAD RADAR (MEMORY PROTECTED)
+            // 🔥 3. SMART SEQUENTIAL BATCH RADAR
             // ---------------------------------------------
             if (window.orderedStopIds && window.orderedStopIds.length > 0) {
                 let firstPendingIndex = -1;
                 
+                // A. Find the Cursor (First Pending Student in Ordered List)
                 for (let i = 0; i < window.orderedStopIds.length; i++) {
                     const id = window.orderedStopIds[i];
                     const markerObj = window.routeMarkers.find(m => m.items.some(item => item.id === id));
@@ -252,19 +251,24 @@
                             s.type === 'student' && 
                             s.status === 'pending' && 
                             !s.isExcluded &&
-                            !window.alertedStudentIds.has(s.id) // ✅ CHECK MEMORY
+                            !window.alertedStudentIds.has(s.id) 
                         );
                         if (isPending) { firstPendingIndex = i; break; }
                     }
                 }
 
+                // B. Scan SEQUENTIALLY from Cursor.
+                // Stop scanning as soon as we hit a stop that is NOT close.
+                // This allows 2,3,4 (Batch) but stops before 6 (Far away).
                 if (firstPendingIndex !== -1) {
-                    const lookAheadCount = 3; 
                     let batchIds = [];
                     let batchNames = [];
-                    for (let k = 0; k < lookAheadCount; k++) {
+                    
+                    // Look ahead a maximum of 5 stops to prevent infinite scanning in weird cases
+                    for (let k = 0; k < 5; k++) {
                         const targetIndex = firstPendingIndex + k;
                         if (targetIndex >= window.orderedStopIds.length) break;
+
                         const targetId = window.orderedStopIds[targetIndex];
                         const targetMarker = window.routeMarkers.find(m => m.items.some(item => item.id === targetId));
                         
@@ -273,7 +277,7 @@
                             const distToStop = google.maps.geometry.spherical.computeDistanceBetween(myLocObj, stopLoc);
                             
                             if (distToStop < APPROACH_RADIUS) {
-                                // 🔥 FILTER: Only Pending + Not Excluded + Not Previously Alerted
+                                // ✅ CLOSE: Add valid students to batch
                                 const activeStudents = targetMarker.items.filter(s => 
                                     s.type === 'student' && 
                                     s.status === 'pending' && 
@@ -282,26 +286,30 @@
                                 );
                                 
                                 if (activeStudents.length > 0) {
-                                    activeStudents.forEach(s => window.alertedStudentIds.add(s.id)); // ✅ ADD TO MEMORY
-                                    
+                                    activeStudents.forEach(s => window.alertedStudentIds.add(s.id)); 
                                     batchIds.push(...activeStudents.map(i => i.id));
                                     const namesAtThisStop = activeStudents.map(s => s.name).join(" & ");
                                     batchNames.push(namesAtThisStop);
                                     console.log("➕ Adding to batch: " + namesAtThisStop);
                                 }
+                            } else {
+                                // 🛑 FAR: Break the loop immediately!
+                                // We reached the "gap" in the route. Do not jump over it.
+                                break; 
                             }
                         }
                     }
+
                     if (batchIds.length > 0) {
                         const finalNameString = batchNames.join(" + ");
-                        console.log("📤 Sending Batch Alert: " + finalNameString);
+                        console.log("📤 Sending Sequential Batch: " + finalNameString);
                         sendToFlutter({ action: 'stopApproaching', stopIds: batchIds, stopName: finalNameString });
                     }
                 }
             }
 
             // ---------------------------------------------
-            // 🔥 4. CHECK FINAL ARRIVAL (LATCH PROTECTED)
+            // 🔥 4. CHECK FINAL ARRIVAL
             // ---------------------------------------------
             
             if (currentRouteType === 'midday' && !hasLeftStartZone && startStopLocation) {
@@ -334,7 +342,6 @@
                     else if (endStopLocation) { targetLoc = endStopLocation; triggerRadius = 100; }
                 }
                 else {
-                    // Fallback
                     if (currentShift === 'AM' && endStopLocation) { targetLoc = endStopLocation; triggerRadius = 300; }
                     else if (endStopLocation) { targetLoc = endStopLocation; triggerRadius = 100; }
                 }
@@ -373,12 +380,9 @@
     });
 
     window.setRouteData = function(stops, shift, routeType) {
-      // 🔥 CHECK SIGNATURE: Detect if this is a new route or just an update
-      // We assume Start/End ID match means it's the same route trip.
       const newSignature = shift + "_" + routeType + "_" + (stops.length > 0 ? stops[0].id : "");
       
       if (newSignature !== lastRouteSignature) {
-          // New Route! Reset Everything.
           console.log("🔄 New Route Detected. Resetting Locks.");
           window.alertedStudentIds.clear();
           hasTriggeredArrival = false;
@@ -386,7 +390,6 @@
           lastRouteSignature = newSignature;
       } else {
           console.log("🔄 Route Update. Preserving Locks.");
-          // Do NOT reset hasTriggeredArrival or alertedStudentIds
       }
 
       currentShift = shift; 
@@ -408,7 +411,6 @@
          const marker = new google.maps.marker.AdvancedMarkerElement({ map: map, position: { lat: cluster.lat, lng: cluster.lng }, content: pin.element });
          marker.addListener("click", () => { infoWindow.setContent(html); infoWindow.open(map, marker); });
          
-         // Visual Trigger State (Optional, mostly for debug now since we use Global Set)
          const isAlreadyTriggered = cluster.items.some(s => window.alertedStudentIds.has(s.id));
          
          window.routeMarkers.push({
@@ -499,9 +501,12 @@
                        Math.abs(m.lng - cluster.lng) < 0.00001
                    );
                    if (markerObj && markerObj.pin) {
-                       markerObj.pin.glyphText = visualCounter.toString();
+                       const activeStudents = cluster.items.filter(s => s.type === 'student' && !s.isExcluded);
+                       if (activeStudents.length > 0) {
+                           markerObj.pin.glyphText = visualCounter.toString();
+                           visualCounter++;
+                       }
                    }
-                   visualCounter++;
                });
                orderedIds.push(endPoint.items[0].id);
 
