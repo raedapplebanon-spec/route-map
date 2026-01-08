@@ -26,7 +26,7 @@
     <div class="legend-row"><div class="legend-color" style="background:#00c853"></div><span>البداية</span></div>
     <div class="legend-row"><div class="legend-color" style="background:#d50000"></div><span>النهاية</span></div>
     <div class="legend-row"><div class="legend-color" style="background:#1a73e8"></div><span>آمن (Safe)</span></div>
-    <div class="legend-row"><div class="legend-color" style="background:#ff9800"></div><span>يتطلب المشي (Warning)</span></div>
+    <div class="legend-row"><div class="legend-color" style="background:#d32f2f"></div><span>يتطلب المشي (Warning)</span></div>
   </div>
 
   <div id="route-summary" class="route-summary" style="display: none;">
@@ -40,13 +40,13 @@
     // --- Globals ---
     window.routeMarkers = [];
     window.availableMarkers = [];
-    window.walkLines = []; // Store dotted lines to clear them later
+    window.walkLines = []; 
     
     let map, directionsService, directionsRenderer, infoWindow;
     let mapReady = false;
     const MY_MAP_ID = "48c2bb983bd19c1c44d95cb7";
     
-    // 🔥 CONFIG: Warning Threshold (Meters)
+    // 🔥 CONFIG: Threshold in Meters (40m)
     const SNAP_THRESHOLD = 40; 
 
     function haversineDistance(lat1, lng1, lat2, lng2) {
@@ -235,93 +235,80 @@
            waypoints: waypoints, travelMode: google.maps.TravelMode.DRIVING, optimizeWaypoints: true,
        }, (result, status) => {
            if (status === "OK") {
-               const optimizedOrder = result.routes[0].waypoint_order;
-               // Re-order the waypoints based on Google's result
-               const finalWaypoints = optimizedOrder.map(index => waypoints[index]);
-               // Render Final Route AND Check Accessibility
-               renderFinalRoute(startPoint, endPoint, finalWaypoints);
+               directionsRenderer.setDirections(result);
+               
+               // 🔥 CHECK ACCESSIBILITY
+               const legs = result.routes[0].legs;
+               const optimizedOrder = result.routes[0].waypoint_order; 
+               let visualCounter = 1;
+
+               // Optimized Waypoints Order
+               // We need to iterate through the legs.
+               // Leg 0 goes to the First Optimized Waypoint.
+               // Leg 1 goes to the Second Optimized Waypoint.
+               
+               for(let i=0; i < optimizedOrder.length; i++) {
+                   const legIndex = i; // Legs match the optimized order sequence
+                   if(legIndex >= legs.length) continue;
+
+                   const waypointIndex = optimizedOrder[i]; // Original index in 'waypoints' array
+                   const originalLocObj = waypoints[waypointIndex].location;
+                   const snappedLoc = legs[legIndex].end_location; // Where Google Stops
+
+                   // Find the map marker for this location
+                   const markerObj = window.routeMarkers.find(m => 
+                       Math.abs(m.lat - originalLocObj.lat) < 0.0001 && 
+                       Math.abs(m.lng - originalLocObj.lng) < 0.0001
+                   );
+
+                   if(markerObj && markerObj.pin) {
+                       // 1. Set Visual Number (1, 2, 3...)
+                       const isAssistant = markerObj.html.includes("المساعد");
+                       if (!isAssistant) {
+                           markerObj.pin.glyphText = visualCounter.toString();
+                           visualCounter++;
+                       }
+
+                       // 2. Check Distance (Snap Check)
+                       const distance = google.maps.geometry.spherical.computeDistanceBetween(
+                           new google.maps.LatLng(originalLocObj.lat, originalLocObj.lng),
+                           snappedLoc
+                       );
+
+                       if (distance > SNAP_THRESHOLD) {
+                           console.warn(`⚠️ Warning: Stop ${visualCounter-1} is ${Math.round(distance)}m from the road.`);
+                           
+                           // 🔥 WARNING STYLE
+                           markerObj.pin.background = "#d32f2f"; // Red Background
+                           markerObj.pin.borderColor = "#b71c1c"; // Darker Red Border
+                           markerObj.pin.glyphText = "⚠️"; 
+                           markerObj.pin.glyphColor = "white"; 
+
+                           // Draw Dotted Line
+                           const walkLine = new google.maps.Polyline({
+                               path: [{lat: originalLocObj.lat, lng: originalLocObj.lng}, snappedLoc],
+                               geodesic: true,
+                               strokeColor: "#d32f2f",
+                               strokeOpacity: 0,
+                               strokeWeight: 2,
+                               icons: [{ icon: { path: 'M 0,-1 0,1', strokeOpacity: 1, scale: 2 }, offset: '0', repeat: '10px' }],
+                               map: map
+                           });
+                           window.walkLines.push(walkLine);
+
+                           // Update Info Window
+                           let warningHtml = `<div style="background:#ffebee; color:#c62828; padding:5px; border-radius:4px; margin-bottom:5px; font-size:12px; border:1px solid #ef9a9a;">⚠️ <b>تنبيه:</b> الحافلة تتوقف على بعد ${Math.round(distance)}م</div>`;
+                           markerObj.html = markerObj.html.replace('<hr>', `<hr>${warningHtml}`);
+                       }
+                   }
+               }
+
+               // Summary
+               let dist = 0, dur = 0;
+               result.routes[0].legs.forEach(l => { dist += l.distance.value; dur += l.duration.value; });
+               updateRouteSummary((dist / 1000).toFixed(1), Math.round(dur / 60));
            }
        });
-    }
-
-    function renderFinalRoute(start, end, waypoints) {
-      directionsService.route({
-        origin: { lat: start.lat, lng: start.lng },
-        destination: { lat: end.lat, lng: end.lng },
-        waypoints: waypoints,
-        travelMode: google.maps.TravelMode.DRIVING,
-        optimizeWaypoints: false, // Order is already fixed
-      }, (result, status) => {
-        if (status === "OK") {
-            directionsRenderer.setDirections(result);
-            const legs = result.routes[0].legs; 
-            
-            // Loop through legs to find Snapped Locations
-            // legs[0] ends at the first waypoint
-            
-            let visualCounter = 1;
-
-            waypoints.forEach((wp, index) => {
-                const legIndex = index; 
-                if (legIndex >= legs.length) return;
-
-                const snappedLoc = legs[legIndex].end_location; // Google's safe road spot
-                const originalLoc = wp.location; // Original House Pin
-
-                // Find the Marker for this location
-                const markerObj = window.routeMarkers.find(m => 
-                    Math.abs(m.lat - originalLoc.lat) < 0.0001 && 
-                    Math.abs(m.lng - originalLoc.lng) < 0.0001
-                );
-
-                if (markerObj && markerObj.pin) {
-                    // 1. UPDATE NUMBER
-                    const isAssistant = markerObj.html.includes("المساعد");
-                    if (!isAssistant) {
-                        markerObj.pin.glyphText = visualCounter.toString();
-                        visualCounter++;
-                    }
-
-                    // 2. 🔥 CHECK ACCESSIBILITY
-                    const distance = google.maps.geometry.spherical.computeDistanceBetween(
-                        new google.maps.LatLng(originalLoc.lat, originalLoc.lng),
-                        snappedLoc
-                    );
-
-                    if (distance > SNAP_THRESHOLD) {
-                        console.warn(`⚠️ Warning: Stop ${visualCounter-1} is ${Math.round(distance)}m from the road.`);
-                        
-                        // A. Visual Warning on Pin
-                        markerObj.pin.background = "#ff9800"; // Orange
-                        markerObj.pin.borderColor = "#e65100";
-                        markerObj.pin.glyphText = "⚠️"; // The requested warning icon
-                        markerObj.pin.glyphColor = "white";
-                        
-                        // B. Draw Dotted Walk Line
-                        const walkLine = new google.maps.Polyline({
-                            path: [{lat: originalLoc.lat, lng: originalLoc.lng}, snappedLoc],
-                            geodesic: true,
-                            strokeColor: "#d32f2f",
-                            strokeOpacity: 0,
-                            strokeWeight: 2,
-                            icons: [{ icon: { path: 'M 0,-1 0,1', strokeOpacity: 1, scale: 2 }, offset: '0', repeat: '10px' }],
-                            map: map
-                        });
-                        window.walkLines.push(walkLine);
-
-                        // C. Update Info Window
-                        let warningHtml = `<div style="background:#fff3e0; color:#e65100; padding:5px; border-radius:4px; margin-bottom:5px; font-size:12px;">⚠️ <b>تنبيه:</b> الحافلة تتوقف على بعد ${Math.round(distance)}م</div>`;
-                        markerObj.html = markerObj.html.replace('<hr>', `<hr>${warningHtml}`);
-                    }
-                }
-            });
-
-            // Update Summary
-            let dist = 0, dur = 0;
-            legs.forEach(l => { dist += l.distance.value; dur += l.duration.value; });
-            updateRouteSummary((dist / 1000).toFixed(1), Math.round(dur / 60));
-        }
-      });
     }
   </script>
 </body>
