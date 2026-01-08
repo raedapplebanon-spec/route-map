@@ -27,6 +27,7 @@
     <div class="legend-row"><div class="legend-color" style="background:#d50000"></div><span>النهاية</span></div>
     <div class="legend-row"><div class="legend-color" style="background:#1a73e8"></div><span>آمن (Safe)</span></div>
     <div class="legend-row"><div class="legend-color" style="background:#d32f2f"></div><span>يتطلب المشي (Warning)</span></div>
+    <div class="legend-row"><div class="legend-color" style="background:#ff9100"></div><span>خارج الجولة</span></div>
   </div>
 
   <div id="route-summary" class="route-summary" style="display: none;">
@@ -42,11 +43,14 @@
     window.availableMarkers = [];
     window.walkLines = []; 
     
+    // 🔥 NEW: Check to prevent flashing
+    let lastDataHash = ""; 
+
     let map, directionsService, directionsRenderer, infoWindow;
     let mapReady = false;
     const MY_MAP_ID = "48c2bb983bd19c1c44d95cb7";
     
-    // 🔥 CONFIG: Warning Distance
+    // 🔥 CONFIG: Warning Threshold (Meters)
     const SNAP_THRESHOLD = 40; 
 
     function haversineDistance(lat1, lng1, lat2, lng2) {
@@ -165,6 +169,14 @@
     });
 
     window.setRouteData = function(routeArray, availableArray) {
+      // 🔥 FIX FLASHING: Check if data is exactly the same as before
+      const currentHash = JSON.stringify({ r: routeArray, a: availableArray });
+      if (currentHash === lastDataHash) {
+          console.log("🛑 Data unchanged, skipping redraw.");
+          return;
+      }
+      lastDataHash = currentHash;
+
       // Clear all
       window.routeMarkers.forEach(obj => obj.marker.map = null);
       window.availableMarkers.forEach(obj => obj.marker.map = null);
@@ -189,6 +201,16 @@
       const routeClusters = groupCloseLocations(routeArray);
       const availableClusters = groupCloseLocations(availableArray);
 
+      // Helper to generate Student Rows with Grade/Section
+      const generateStudentRows = (items) => {
+          return items.map(x => `
+            <div style="margin-bottom:6px; border-bottom:1px solid #eee; padding-bottom:4px;">
+                <b>${x.studentName || "طالب"}</b><br>
+                <span style="font-size:12px; color:#555;">${x.gradeName || ""} - ${x.sectionName || ""}</span>
+            </div>
+          `).join('');
+      };
+
       // 1. Render Route Markers
       routeClusters.forEach(cluster => {
         const pos = { lat: cluster.lat, lng: cluster.lng };
@@ -198,8 +220,8 @@
         else if (cluster.isFinal) { color = "#d50000"; initialText = "E"; headerTitle = "نقطة النهاية"; }
         else if (cluster.stopType === 'assistant') { color = "#9C27B0"; initialText = "A"; headerTitle = "المساعد"; }
 
-        // ✅ FIXED: Use x.studentName (Builder specific)
-        let studentRows = cluster.items.map(x => `<div style="margin-bottom:6px; border-bottom:1px solid #eee; padding-bottom:4px;"><b>${x.studentName || "طالب"}</b></div>`).join('');
+        // ✅ FIXED: Using generateStudentRows for consistent formatting
+        let studentRows = generateStudentRows(cluster.items);
         let html = `<div style="color:black;text-align:right;direction:rtl;min-width:180px;"><b style="color:${color}; font-size:14px;">${headerTitle}</b><hr>${studentRows}</div>`;
         let namesArr = cluster.items.map(x => x.studentName || "");
         
@@ -210,8 +232,13 @@
       availableClusters.forEach(cluster => {
         const pos = { lat: cluster.lat, lng: cluster.lng };
         bounds.extend(pos);
-        let html = `<div style="color:black;text-align:right;direction:rtl;min-width:180px;"><b style="color:#ff9100; font-size:14px;">خارج الجولة</b><hr>...</div>`;
-        window.availableMarkers.push(addMarker(pos, "available", html, "#ff9100", cluster.items.length.toString(), []));
+        
+        // ✅ FIXED: Now showing Name, Grade, Section for Orange Markers too
+        let studentRows = generateStudentRows(cluster.items);
+        let html = `<div style="color:black;text-align:right;direction:rtl;min-width:180px;"><b style="color:#ff9100; font-size:14px;">خارج الجولة</b><hr>${studentRows}</div>`;
+        let namesArr = cluster.items.map(x => x.studentName || "");
+
+        window.availableMarkers.push(addMarker(pos, "available", html, "#ff9100", cluster.items.length.toString(), namesArr));
       });
 
       if (routeClusters.length >= 2) calculateRoadRoute(routeClusters);
@@ -256,9 +283,6 @@
         if (status === "OK") {
             directionsRenderer.setDirections(result);
             const legs = result.routes[0].legs; 
-            
-            // Loop through legs to find Snapped Locations
-            // legs[0] ends at the first waypoint
             
             let visualCounter = 1;
 
