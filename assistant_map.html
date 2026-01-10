@@ -65,6 +65,8 @@
 
     // 🔒 LOCK 3: Signature to detect New Route vs Update
     let lastRouteSignature = ""; 
+    // 💰 MONEY SAVER: Geometry Signature (Location + Exclusion)
+    let lastGeometrySignature = ""; 
 
     let userLocationMarker = null;
     let radarCircle = null;
@@ -238,13 +240,9 @@
             map.panTo(myLoc); 
             isBusTrackingActive = true;
 
-            // ---------------------------------------------
-            // 🔥 3. SMART SEQUENTIAL BATCH RADAR
-            // ---------------------------------------------
+            // ... Radar & Arrival Logic (Same as before) ...
             if (window.orderedStopIds && window.orderedStopIds.length > 0) {
                 let firstPendingIndex = -1;
-                
-                // A. Find the Cursor (First Pending Student in Ordered List)
                 for (let i = 0; i < window.orderedStopIds.length; i++) {
                     const id = window.orderedStopIds[i];
                     const markerObj = window.routeMarkers.find(m => m.items.some(item => item.id === id));
@@ -260,12 +258,10 @@
                     }
                 }
 
-                // B. Scan SEQUENTIALLY from Cursor.
                 if (firstPendingIndex !== -1) {
                     let batchIds = [];
                     let batchNames = [];
                     
-                    // Look ahead max 5 stops
                     for (let k = 0; k < 5; k++) {
                         const targetIndex = firstPendingIndex + k;
                         if (targetIndex >= window.orderedStopIds.length) break;
@@ -278,7 +274,6 @@
                             const distToStop = google.maps.geometry.spherical.computeDistanceBetween(myLocObj, stopLoc);
                             
                             if (distToStop < APPROACH_RADIUS) {
-                                // ✅ CLOSE: Add valid students to batch
                                 const activeStudents = targetMarker.items.filter(s => 
                                     s.type === 'student' && 
                                     s.status === 'pending' && 
@@ -294,7 +289,6 @@
                                     console.log("➕ Adding to batch: " + namesAtThisStop);
                                 }
                             } else {
-                                // 🛑 FAR: Break loop. Sequential order broken.
                                 break; 
                             }
                         }
@@ -308,10 +302,6 @@
                 }
             }
 
-            // ---------------------------------------------
-            // 🔥 4. CHECK FINAL ARRIVAL (LOCKED)
-            // ---------------------------------------------
-            
             if (currentRouteType === 'midday' && !hasLeftStartZone && startStopLocation) {
                 const startLocObj = new google.maps.LatLng(startStopLocation.lat, startStopLocation.lng);
                 const distFromStart = google.maps.geometry.spherical.computeDistanceBetween(myLocObj, startLocObj);
@@ -322,7 +312,7 @@
                 }
             }
 
-            if (!hasTriggeredArrival) { // <--- LOCK CHECK
+            if (!hasTriggeredArrival) { 
                 let targetLoc = null;
                 let triggerRadius = 50; 
                 let canTrigger = true;
@@ -351,7 +341,7 @@
                     const dist = google.maps.geometry.spherical.computeDistanceBetween(myLocObj, t);
                     
                     if (dist < triggerRadius) {
-                        hasTriggeredArrival = true; // <--- LOCK ENGAGED
+                        hasTriggeredArrival = true; 
                         console.log("🏁 Arrival Triggered!");
                         sendToFlutter({ action: 'arrivedAtEnd' });
                     }
@@ -381,25 +371,36 @@
     });
 
     window.setRouteData = function(stops, shift, routeType) {
+      // 🔒 LOCK RESET LOGIC
       const newSignature = shift + "_" + routeType + "_" + (stops.length > 0 ? stops[0].id : "");
-      
       if (newSignature !== lastRouteSignature) {
           console.log("🔄 New Route Detected. Resetting Locks.");
           window.alertedStudentIds.clear();
-          hasTriggeredArrival = false; // <--- LOCK RESET ONLY ON NEW ROUTE
+          hasTriggeredArrival = false; 
           hasLeftStartZone = false;
           lastRouteSignature = newSignature;
-      } else {
-          console.log("🔄 Route Update. Preserving Locks.");
       }
 
       currentShift = shift; 
       currentRouteType = routeType; 
 
+      // 💰 MONEY SAVER LOGIC STARTS HERE 💰
+      // Create a fingerprint of Lat, Lng, and Exclusion Status. 
+      // If ONLY the "status" changed (Picked/Dropped), this fingerprint stays the SAME.
+      const currentGeometrySignature = stops.map(s => `${s.id}_${s.lat}_${s.lng}_${s.isExcluded}`).join("|");
+      const isStructureChanged = currentGeometrySignature !== lastGeometrySignature;
+      lastGeometrySignature = currentGeometrySignature;
+
+      // 1. CLEAR OLD MARKERS (Visuals only)
       window.routeMarkers.forEach(obj => obj.marker.map = null);
       window.routeMarkers = [];
-      directionsRenderer.setDirections({ routes: [] });
-      document.getElementById("route-summary").style.display = "none";
+
+      // Only clear the blue line if the route path actually changed!
+      if (isStructureChanged) {
+        directionsRenderer.setDirections({ routes: [] });
+        document.getElementById("route-summary").style.display = "none";
+      }
+
       const bounds = new google.maps.LatLngBounds();
       const clusters = groupCloseLocations(stops, 15);
       
@@ -422,6 +423,7 @@
 
       let validStopCounter = 0; 
 
+      // 2. RE-DRAW MARKERS (Colors update automatically here)
       clusters.forEach((cluster) => {
           const pos = { lat: cluster.lat, lng: cluster.lng };
           bounds.extend(pos);
@@ -447,6 +449,7 @@
           }
           else {
              validStopCounter++; 
+             // Note: 'text' might be updated later by calculateRoadRoute OR by our manual restoration
              text = validStopCounter.toString();
              const activeStudents = cluster.items.filter(s => s.type === 'student' && !s.isExcluded);
              const anyPending = activeStudents.some(s => s.status === 'pending');
@@ -466,9 +469,68 @@
           addMarker(cluster, color, text, html);
       });
 
-      if (clusters.length >= 2) calculateRoadRoute(clusters);
+      // 3. DECIDE: API vs FREE
+      if (clusters.length >= 2) {
+          if (isStructureChanged) {
+              console.log("🔄 Route structure changed. Calling API ($)...");
+              calculateRoadRoute(clusters); // 💸 PAID CALL
+          } else {
+              console.log("💰 Status update only. Skipping API call (Free). Restoring numbers.");
+              // 🆓 FREE LOGIC: Restore the numbers (1, 2, 3) from the previous calculation
+              restoreMarkerVisuals(); 
+          }
+      }
+      
       if (!isBusTrackingActive && !bounds.isEmpty()) map.fitBounds(bounds);
     };
+
+    // 💰 MONEY SAVER HELPER: Restores numbers without asking Google
+    function restoreMarkerVisuals() {
+        if (!window.orderedStopIds || window.orderedStopIds.length === 0) return;
+        
+        let visualCounter = 1;
+        // We iterate through the OLD calculated order
+        // Note: Start/End points are usually first/last in orderedIds, handled separately or implicitly
+        
+        // We need to map the ORDERED IDs back to the NEW markers
+        // Skip Index 0 (Start) and Last (End) for numbering usually, depending on logic
+        // But your logic assigns numbers based on cluster Index in the route
+        
+        // Simplest way: Re-run the visual counter logic based on the *existing* orderedIds
+        // This is tricky because orderedIds is flat, but markers are clustered.
+        // Let's rely on the routeMarkers we just built.
+        
+        // Since we didn't re-optimize, the clusters are in the SAME order as before (roughly).
+        // Actually, without 'result.routes[0].waypoint_order', we don't know the visual order easily
+        // UNLESS we saved the "Cluster Order" previously.
+        
+        // BETTER FIX: The 'orderedIds' variable tells us the sequence.
+        // Let's loop through orderedIds and find the markers.
+        
+        let processedClusters = new Set();
+
+        window.orderedStopIds.forEach(id => {
+             const markerObj = window.routeMarkers.find(m => m.items.some(item => item.id === id));
+             if (!markerObj) return;
+             if (processedClusters.has(markerObj)) return; // Already numbered this cluster
+             
+             // Check if it needs a number (Students/Assistants)
+             // Copying logic from calculateRoadRoute:
+             const isStart = markerObj.isStart;
+             const isEnd = markerObj.isEnd;
+             
+             if (!isStart && !isEnd) {
+                 const activeStudents = markerObj.items.filter(s => s.type === 'student' && !s.isExcluded);
+                 if (activeStudents.length > 0) {
+                     // Update the pin text
+                     markerObj.pin.glyphText = visualCounter.toString();
+                     markerObj.marker.content = markerObj.pin.element; // Apply change
+                     visualCounter++;
+                     processedClusters.add(markerObj);
+                 }
+             }
+        });
+    }
 
     function calculateRoadRoute(clusters) {
        const startPoint = clusters.find(c => c.isStart);
