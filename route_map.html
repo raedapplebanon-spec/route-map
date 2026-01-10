@@ -26,7 +26,7 @@
     <div class="legend-row"><div class="legend-color" style="background:#00c853"></div><span>البداية</span></div>
     <div class="legend-row"><div class="legend-color" style="background:#d50000"></div><span>النهاية</span></div>
     <div class="legend-row"><div class="legend-color" style="background:#1a73e8"></div><span>ضمن الجولة</span></div>
-    <div class="legend-row"><div style="width: 14px; margin-left: 6px; text-align: center;">⚠️</div><span>يتطلب مشي > ٣٠م</span></div>
+    <div class="legend-row"><div style="width: 14px; margin-left: 6px; text-align: center;">⚠️</div><span>يتطلب مشي > ٢٠م</span></div>
     <div class="legend-row"><div class="legend-color" style="background:#ff9100"></div><span>خارج الجولة</span></div>
   </div>
 
@@ -43,15 +43,18 @@
     window.availableMarkers = [];
     window.walkLines = []; 
     
-    // 🔥 NEW: Check to prevent flashing
+    // 🔥 Check to prevent flashing
     let lastDataHash = ""; 
+    
+    // 💰 MONEY SAVER: The Debounce Timer
+    let routeCalculationTimer = null;
 
     let map, directionsService, directionsRenderer, infoWindow;
     let mapReady = false;
     const MY_MAP_ID = "48c2bb983bd19c1c44d95cb7";
     
     // 🔥 CONFIG: Warning Threshold (Meters)
-    const SNAP_THRESHOLD = 30; 
+    const SNAP_THRESHOLD = 20; 
 
     function haversineDistance(lat1, lng1, lat2, lng2) {
       const R = 6371e3; 
@@ -177,7 +180,7 @@
       }
       lastDataHash = currentHash;
 
-      // Clear all
+      // Clear all visuals
       window.routeMarkers.forEach(obj => obj.marker.map = null);
       window.availableMarkers.forEach(obj => obj.marker.map = null);
       window.walkLines.forEach(line => line.setMap(null)); 
@@ -186,6 +189,7 @@
       window.availableMarkers = [];
       window.walkLines = [];
       
+      // Clear line immediately so user knows it's recalculating
       directionsRenderer.setDirections({ routes: [] });
       document.getElementById("route-summary").style.display = "none";
 
@@ -211,7 +215,7 @@
           `).join('');
       };
 
-      // 1. Render Route Markers
+      // 1. Render Route Markers (INSTANT)
       routeClusters.forEach(cluster => {
         const pos = { lat: cluster.lat, lng: cluster.lng };
         bounds.extend(pos);
@@ -220,7 +224,6 @@
         else if (cluster.isFinal) { color = "#d50000"; initialText = "E"; headerTitle = "نقطة النهاية"; }
         else if (cluster.stopType === 'assistant') { color = "#9C27B0"; initialText = "A"; headerTitle = "المساعد"; }
 
-        // ✅ FIXED: Using generateStudentRows for consistent formatting
         let studentRows = generateStudentRows(cluster.items);
         let html = `<div style="color:black;text-align:right;direction:rtl;min-width:180px;"><b style="color:${color}; font-size:14px;">${headerTitle}</b><hr>${studentRows}</div>`;
         let namesArr = cluster.items.map(x => x.studentName || "");
@@ -228,12 +231,11 @@
         window.routeMarkers.push(addMarker(pos, "route", html, color, initialText, namesArr));
       });
 
-      // 2. Render Available Markers
+      // 2. Render Available Markers (INSTANT)
       availableClusters.forEach(cluster => {
         const pos = { lat: cluster.lat, lng: cluster.lng };
         bounds.extend(pos);
         
-        // ✅ FIXED: Now showing Name, Grade, Section for Orange Markers too
         let studentRows = generateStudentRows(cluster.items);
         let html = `<div style="color:black;text-align:right;direction:rtl;min-width:180px;"><b style="color:#ff9100; font-size:14px;">خارج الجولة</b><hr>${studentRows}</div>`;
         let namesArr = cluster.items.map(x => x.studentName || "");
@@ -241,8 +243,24 @@
         window.availableMarkers.push(addMarker(pos, "available", html, "#ff9100", cluster.items.length.toString(), namesArr));
       });
 
-      if (routeClusters.length >= 2) calculateRoadRoute(routeClusters);
       if (!bounds.isEmpty()) map.fitBounds(bounds);
+
+      // 3. 💰 MONEY SAVER LOGIC 💰
+      
+      // A. Cancel any pending calculation from a previous click
+      if (routeCalculationTimer) {
+          clearTimeout(routeCalculationTimer);
+          console.log("⏳ ...Waiting for more edits (canceling previous request)");
+      }
+
+      // B. Only calculate if we have at least 2 points
+      if (routeClusters.length >= 2) {
+          // C. Set a new timer for 2 seconds
+          routeCalculationTimer = setTimeout(() => {
+             console.log("🚀 User stopped editing. Calculating Route ($)...");
+             calculateRoadRoute(routeClusters);
+          }, 2000); 
+      }
     };
 
     function calculateRoadRoute(clusters) {
@@ -304,6 +322,7 @@
                     const isAssistant = markerObj.html.includes("المساعد");
                     if (!isAssistant) {
                         markerObj.pin.glyphText = visualCounter.toString();
+                        markerObj.marker.content = markerObj.pin.element; // Force update
                         visualCounter++;
                     }
 
@@ -321,6 +340,7 @@
                         markerObj.pin.borderColor = "#b71c1c";
                         markerObj.pin.glyphText = "⚠️"; 
                         markerObj.pin.glyphColor = "white";
+                        markerObj.marker.content = markerObj.pin.element; // Force update
                         
                         // B. Draw Dotted Walk Line
                         const walkLine = new google.maps.Polyline({
@@ -336,7 +356,9 @@
 
                         // C. Update Info Window
                         let warningHtml = `<div style="background:#ffebee; color:#c62828; padding:5px; border-radius:4px; margin-bottom:5px; font-size:12px; border:1px solid #ef9a9a;">⚠️ <b>تنبيه:</b> الحافلة تتوقف على بعد ${Math.round(distance)}م</div>`;
-                        markerObj.html = markerObj.html.replace('<hr>', `<hr>${warningHtml}`);
+                        if (!markerObj.html.includes("تنبيه:")) {
+                             markerObj.html = markerObj.html.replace('<hr>', `<hr>${warningHtml}`);
+                        }
                     }
                 }
             });
@@ -351,6 +373,3 @@
   </script>
 </body>
 </html>
-
-
-
