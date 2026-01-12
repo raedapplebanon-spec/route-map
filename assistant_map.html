@@ -240,7 +240,7 @@
             map.panTo(myLoc); 
             isBusTrackingActive = true;
 
-            // ... Radar & Arrival Logic (Same as before) ...
+            // ... Radar & Arrival Logic ...
             if (window.orderedStopIds && window.orderedStopIds.length > 0) {
                 let firstPendingIndex = -1;
                 for (let i = 0; i < window.orderedStopIds.length; i++) {
@@ -248,8 +248,9 @@
                     const markerObj = window.routeMarkers.find(m => m.items.some(item => item.id === id));
                     
                     if (markerObj) {
+                        // 🔥 UPDATED: Check for Student OR Employee
                         const isPending = markerObj.items.some(s => 
-                            s.type === 'student' && 
+                            (s.type === 'student' || s.type === 'employee') && 
                             s.status === 'pending' && 
                             !s.isExcluded &&
                             !window.alertedStudentIds.has(s.id) 
@@ -274,17 +275,18 @@
                             const distToStop = google.maps.geometry.spherical.computeDistanceBetween(myLocObj, stopLoc);
                             
                             if (distToStop < APPROACH_RADIUS) {
-                                const activeStudents = targetMarker.items.filter(s => 
-                                    s.type === 'student' && 
+                                // 🔥 UPDATED: Include Employees in Alert
+                                const activeItems = targetMarker.items.filter(s => 
+                                    (s.type === 'student' || s.type === 'employee') && 
                                     s.status === 'pending' && 
                                     !s.isExcluded &&
                                     !window.alertedStudentIds.has(s.id)
                                 );
                                 
-                                if (activeStudents.length > 0) {
-                                    activeStudents.forEach(s => window.alertedStudentIds.add(s.id)); 
-                                    batchIds.push(...activeStudents.map(i => i.id));
-                                    const namesAtThisStop = activeStudents.map(s => s.name).join(" & ");
+                                if (activeItems.length > 0) {
+                                    activeItems.forEach(s => window.alertedStudentIds.add(s.id)); 
+                                    batchIds.push(...activeItems.map(i => i.id));
+                                    const namesAtThisStop = activeItems.map(s => s.name).join(" & ");
                                     batchNames.push(namesAtThisStop);
                                     console.log("➕ Adding to batch: " + namesAtThisStop);
                                 }
@@ -385,8 +387,6 @@
       currentRouteType = routeType; 
 
       // 💰 MONEY SAVER LOGIC STARTS HERE 💰
-      // Create a fingerprint of Lat, Lng, and Exclusion Status. 
-      // If ONLY the "status" changed (Picked/Dropped), this fingerprint stays the SAME.
       const currentGeometrySignature = stops.map(s => `${s.id}_${s.lat}_${s.lng}_${s.isExcluded}`).join("|");
       const isStructureChanged = currentGeometrySignature !== lastGeometrySignature;
       lastGeometrySignature = currentGeometrySignature;
@@ -448,21 +448,28 @@
               color = "#9C27B0"; text = "A"; header = "المرافق"; 
           }
           else {
+             // Students OR Employees
              validStopCounter++; 
-             // Note: 'text' might be updated later by calculateRoadRoute OR by our manual restoration
              text = validStopCounter.toString();
-             const activeStudents = cluster.items.filter(s => s.type === 'student' && !s.isExcluded);
-             const anyPending = activeStudents.some(s => s.status === 'pending');
-             if (activeStudents.length > 0 && anyPending) color = "#d32f2f"; else color = "#388e3c"; 
+             // Check if anyone in this cluster is Pending
+             const activeItems = cluster.items.filter(s => (s.type === 'student' || s.type === 'employee') && !s.isExcluded);
+             const anyPending = activeItems.some(s => s.status === 'pending');
+             if (activeItems.length > 0 && anyPending) color = "#d32f2f"; else color = "#388e3c"; 
           }
 
           let rows = cluster.items.map(s => {
               if (s.type === 'assistant') return `<div style="margin-bottom:6px; border-bottom:1px solid #eee; padding-bottom:4px;"><b>${s.name || 'مرافق'}</b></div>`;
+              
               let badgeColor = 'bg-red'; let statusTxt = (currentShift === 'PM') ? 'لم يتم التنزيل' : 'لم يتم التحميل'; 
               if (s.status === 'picked') { badgeColor = 'bg-green'; statusTxt = 'تم التحميل'; }
               else if (s.status === 'dropped') { badgeColor = 'bg-green'; statusTxt = 'تم التنزيل'; }
               else if (s.isExcluded) { badgeColor = 'bg-gray'; statusTxt = 'مستبعد'; }
-              return `<div style="margin-bottom:6px; border-bottom:1px solid #eee; padding-bottom:4px;"><span class="status-badge ${badgeColor}">${statusTxt}</span><b>${s.name || 'طالب'}</b><br><span style="font-size:12px; color:#555;">${s.grade || ''}</span></div>`;
+              
+              // 🔥 UPDATED: Show "Employee" if type is employee, else show Grade
+              let details = s.grade || '';
+              if (s.type === 'employee') details = 'موظف';
+
+              return `<div style="margin-bottom:6px; border-bottom:1px solid #eee; padding-bottom:4px;"><span class="status-badge ${badgeColor}">${statusTxt}</span><b>${s.name || 'طالب'}</b><br><span style="font-size:12px; color:#555;">${details}</span></div>`;
           }).join('');
           
           let html = `<div style="color:black;text-align:right;direction:rtl;min-width:180px;"><b style="color:${color}; font-size:14px;">${header}</b><hr>${rows}</div>`;
@@ -476,7 +483,6 @@
               calculateRoadRoute(clusters); // 💸 PAID CALL
           } else {
               console.log("💰 Status update only. Skipping API call (Free). Restoring numbers.");
-              // 🆓 FREE LOGIC: Restore the numbers (1, 2, 3) from the previous calculation
               restoreMarkerVisuals(); 
           }
       }
@@ -489,24 +495,6 @@
         if (!window.orderedStopIds || window.orderedStopIds.length === 0) return;
         
         let visualCounter = 1;
-        // We iterate through the OLD calculated order
-        // Note: Start/End points are usually first/last in orderedIds, handled separately or implicitly
-        
-        // We need to map the ORDERED IDs back to the NEW markers
-        // Skip Index 0 (Start) and Last (End) for numbering usually, depending on logic
-        // But your logic assigns numbers based on cluster Index in the route
-        
-        // Simplest way: Re-run the visual counter logic based on the *existing* orderedIds
-        // This is tricky because orderedIds is flat, but markers are clustered.
-        // Let's rely on the routeMarkers we just built.
-        
-        // Since we didn't re-optimize, the clusters are in the SAME order as before (roughly).
-        // Actually, without 'result.routes[0].waypoint_order', we don't know the visual order easily
-        // UNLESS we saved the "Cluster Order" previously.
-        
-        // BETTER FIX: The 'orderedIds' variable tells us the sequence.
-        // Let's loop through orderedIds and find the markers.
-        
         let processedClusters = new Set();
 
         window.orderedStopIds.forEach(id => {
@@ -514,15 +502,13 @@
              if (!markerObj) return;
              if (processedClusters.has(markerObj)) return; // Already numbered this cluster
              
-             // Check if it needs a number (Students/Assistants)
-             // Copying logic from calculateRoadRoute:
              const isStart = markerObj.isStart;
              const isEnd = markerObj.isEnd;
              
              if (!isStart && !isEnd) {
-                 const activeStudents = markerObj.items.filter(s => s.type === 'student' && !s.isExcluded);
-                 if (activeStudents.length > 0) {
-                     // Update the pin text
+                 // 🔥 UPDATED: Include Employees
+                 const activeItems = markerObj.items.filter(s => (s.type === 'student' || s.type === 'employee') && !s.isExcluded);
+                 if (activeItems.length > 0) {
                      markerObj.pin.glyphText = visualCounter.toString();
                      markerObj.marker.content = markerObj.pin.element; // Apply change
                      visualCounter++;
@@ -538,10 +524,11 @@
        if (!startPoint || !endPoint) return;
        const activeClusters = clusters.filter(c => !c.isExcluded);
        const assistants = activeClusters.filter(c => c.stopType === 'assistant');
-       const students = activeClusters.filter(c => c !== startPoint && c !== endPoint && c.stopType !== 'assistant');
+       const studentsAndEmployees = activeClusters.filter(c => c !== startPoint && c !== endPoint && c.stopType !== 'assistant');
+       
        let waypoints = [];
        assistants.forEach(a => waypoints.push({ location: {lat: a.lat, lng: a.lng}, stopover: true }));
-       students.forEach(s => waypoints.push({ location: {lat: s.lat, lng: s.lng}, stopover: true }));
+       studentsAndEmployees.forEach(s => waypoints.push({ location: {lat: s.lat, lng: s.lng}, stopover: true }));
 
        directionsService.route({
            origin: { lat: startPoint.lat, lng: startPoint.lng },
@@ -556,7 +543,7 @@
 
                orderedIds.push(startPoint.items[0].id);
                orderIndices.forEach(idx => {
-                   const cluster = [...assistants, ...students][idx];
+                   const cluster = [...assistants, ...studentsAndEmployees][idx];
                    cluster.items.forEach(item => orderedIds.push(item.id));
                    
                    const markerObj = window.routeMarkers.find(m => 
@@ -564,8 +551,9 @@
                        Math.abs(m.lng - cluster.lng) < 0.00001
                    );
                    if (markerObj && markerObj.pin) {
-                       const activeStudents = cluster.items.filter(s => s.type === 'student' && !s.isExcluded);
-                       if (activeStudents.length > 0) {
+                       // 🔥 UPDATED: Include Employees in numbering
+                       const activeItems = cluster.items.filter(s => (s.type === 'student' || s.type === 'employee') && !s.isExcluded);
+                       if (activeItems.length > 0) {
                            markerObj.pin.glyphText = visualCounter.toString();
                            visualCounter++;
                        }
@@ -575,7 +563,7 @@
 
                if (currentShift === 'PM' && orderIndices.length > 0) {
                    const lastIndex = orderIndices[orderIndices.length - 1];
-                   const lastCluster = [...assistants, ...students][lastIndex];
+                   const lastCluster = [...assistants, ...studentsAndEmployees][lastIndex];
                    if (lastCluster) pmLastStudentLocation = { lat: lastCluster.lat, lng: lastCluster.lng };
                }
                let dist = 0, dur = 0;
