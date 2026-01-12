@@ -205,16 +205,22 @@
       const routeClusters = groupCloseLocations(routeArray);
       const availableClusters = groupCloseLocations(availableArray);
 
-      // Helper to generate Student Rows with Grade/Section
-      // 🔥 UPDATED: Now handles 'employee' stopType to hide empty grade/sections
+      // Helper to generate Student/Employee Rows
+      // 🔥 UPDATED: Checks for 'employee' stopType and displays "موظف"
       const generateStudentRows = (items) => {
           return items.map(x => {
             let detailsText = "";
+            
+            // Check if Employee
             if (x.stopType === 'employee') {
-                detailsText = "موظف"; // Employee
+                detailsText = "موظف";
             } else {
-                detailsText = `${x.gradeName || ""} - ${x.sectionName || ""}`;
-                if (detailsText === " - ") detailsText = ""; // Clean up empty data
+                // It is a student, format Grade - Section
+                const grade = x.gradeName || "";
+                const section = x.sectionName || "";
+                if (grade || section) {
+                    detailsText = `${grade} - ${section}`;
+                }
             }
 
             return `
@@ -257,16 +263,12 @@
       if (!bounds.isEmpty()) map.fitBounds(bounds);
 
       // 3. 💰 MONEY SAVER LOGIC 💰
-      
-      // A. Cancel any pending calculation from a previous click
       if (routeCalculationTimer) {
           clearTimeout(routeCalculationTimer);
           console.log("⏳ ...Waiting for more edits (canceling previous request)");
       }
 
-      // B. Only calculate if we have at least 2 points
       if (routeClusters.length >= 2) {
-          // C. Set a new timer for 2 seconds
           routeCalculationTimer = setTimeout(() => {
              console.log("🚀 User stopped editing. Calculating Route ($)...");
              calculateRoadRoute(routeClusters);
@@ -280,7 +282,7 @@
        if (!startPoint || !endPoint) return;
 
        const assistants = clusters.filter(c => c.stopType === 'assistant');
-       // Note: 'employee' type automatically falls into this filter as a regular student stop
+       // Employees are treated as students for routing, so they fall into this filter naturally
        const studentStops = clusters.filter(c => c !== startPoint && c !== endPoint && c.stopType !== 'assistant');
        
        let waypoints = [
@@ -296,7 +298,6 @@
            if (status === "OK") {
                const optimizedOrder = result.routes[0].waypoint_order;
                const finalWaypoints = optimizedOrder.map(index => waypoints[index]);
-               // Render Final Route AND Check Accessibility
                renderFinalRoute(startPoint, endPoint, finalWaypoints);
            }
        });
@@ -320,41 +321,34 @@
                 const legIndex = index; 
                 if (legIndex >= legs.length) return;
 
-                const snappedLoc = legs[legIndex].end_location; // Google's safe road spot
-                const originalLoc = wp.location; // Original House Pin
+                const snappedLoc = legs[legIndex].end_location; 
+                const originalLoc = wp.location; 
 
-                // Find the Marker for this location
                 const markerObj = window.routeMarkers.find(m => 
                     Math.abs(m.lat - originalLoc.lat) < 0.0001 && 
                     Math.abs(m.lng - originalLoc.lng) < 0.0001
                 );
 
                 if (markerObj && markerObj.pin) {
-                    // 1. UPDATE NUMBER
                     const isAssistant = markerObj.html.includes("المساعد");
                     if (!isAssistant) {
                         markerObj.pin.glyphText = visualCounter.toString();
-                        markerObj.marker.content = markerObj.pin.element; // Force update
+                        markerObj.marker.content = markerObj.pin.element;
                         visualCounter++;
                     }
 
-                    // 2. 🔥 CHECK ACCESSIBILITY (The Magic)
                     const distance = google.maps.geometry.spherical.computeDistanceBetween(
                         new google.maps.LatLng(originalLoc.lat, originalLoc.lng),
                         snappedLoc
                     );
 
                     if (distance > SNAP_THRESHOLD) {
-                        console.warn(`⚠️ Warning: Stop ${visualCounter-1} is ${Math.round(distance)}m from the road.`);
-                        
-                        // 🔥 UPDATED: RED STYLE + WARNING ICON
-                        markerObj.pin.background = "#d32f2f"; // Red
+                        markerObj.pin.background = "#d32f2f"; 
                         markerObj.pin.borderColor = "#b71c1c";
                         markerObj.pin.glyphText = "⚠️"; 
                         markerObj.pin.glyphColor = "white";
-                        markerObj.marker.content = markerObj.pin.element; // Force update
+                        markerObj.marker.content = markerObj.pin.element; 
                         
-                        // B. Draw Dotted Walk Line
                         const walkLine = new google.maps.Polyline({
                             path: [{lat: originalLoc.lat, lng: originalLoc.lng}, snappedLoc],
                             geodesic: true,
@@ -366,7 +360,6 @@
                         });
                         window.walkLines.push(walkLine);
 
-                        // C. Update Info Window
                         let warningHtml = `<div style="background:#ffebee; color:#c62828; padding:5px; border-radius:4px; margin-bottom:5px; font-size:12px; border:1px solid #ef9a9a;">⚠️ <b>تنبيه:</b> الحافلة تتوقف على بعد ${Math.round(distance)}م</div>`;
                         if (!markerObj.html.includes("تنبيه:")) {
                              markerObj.html = markerObj.html.replace('<hr>', `<hr>${warningHtml}`);
@@ -375,7 +368,6 @@
                 }
             });
 
-            // Update Summary
             let dist = 0, dur = 0;
             legs.forEach(l => { dist += l.distance.value; dur += l.duration.value; });
             updateRouteSummary((dist / 1000).toFixed(1), Math.round(dur / 60));
