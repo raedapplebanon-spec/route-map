@@ -112,15 +112,25 @@
       const clusters = [];
       stops.forEach(stop => {
         let placed = false;
-        const type = (stop.stopType || "").toLowerCase().trim();
+        
+        // 🔥 NORMALIZE DATA: Handle stopType (camelCase) or stop_type (snake_case)
+        const rawType = stop.stopType || stop.stop_type || "";
+        const type = rawType.toLowerCase().trim();
         const shift = (stop.timeShift || "").toUpperCase().trim();
 
+        // Fix Lat/Lng parsing
+        const sLat = parseFloat(stop.lat);
+        const sLng = parseFloat(stop.lng);
+
         for (const c of clusters) {
-          const d = haversineDistance(c.lat, c.lng, parseFloat(stop.lat), parseFloat(stop.lng));
+          const d = haversineDistance(c.lat, c.lng, sLat, sLng);
           if (d < tolerance) {
             c.items.push(stop);
-            if (stop.isStart === true) c.isStart = true;
-            if (stop.isFinal === true) c.isFinal = true;
+            // Update cluster properties if this specific stop has Start/Final flags
+            if (stop.isStart === true || stop.is_start_stop === true) c.isStart = true;
+            if (stop.isFinal === true || stop.is_end_stop === true) c.isFinal = true;
+            
+            // If any item in cluster is assistant, mark cluster as assistant
             if (type === 'assistant') {
               c.stopType = 'assistant';
               if (shift) c.timeShift = shift;
@@ -132,12 +142,12 @@
         }
         if (!placed) {
           clusters.push({
-            lat: parseFloat(stop.lat),
-            lng: parseFloat(stop.lng),
+            lat: sLat,
+            lng: sLng,
             items: [stop],
-            isStart: stop.isStart === true,
-            isFinal: stop.isFinal === true,
-            stopType: type,
+            isStart: (stop.isStart === true || stop.is_start_stop === true),
+            isFinal: (stop.isFinal === true || stop.is_end_stop === true),
+            stopType: type, // This will be 'employee', 'student', or 'assistant'
             timeShift: shift,
             hideMarker: (stop.hideMarker === true || stop.hideMarker === 'true')
           });
@@ -190,12 +200,12 @@
       
       if (data.action === "setRouteData") {
         if (data.routesGrouped && data.routesGrouped.length > 0) {
-           renderAllRoutes(data.routesGrouped, data.availableData);
+            renderAllRoutes(data.routesGrouped, data.availableData);
         } else if (data.routeData && data.routeData.length > 0) {
-           const fakeGroup = [{ routeId: "default", points: data.routeData }];
-           renderAllRoutes(fakeGroup, data.availableData);
+            const fakeGroup = [{ routeId: "default", points: data.routeData }];
+            renderAllRoutes(fakeGroup, data.availableData);
         } else {
-           renderAllRoutes([], data.availableData);
+            renderAllRoutes([], data.availableData);
         }
       }
     }
@@ -287,6 +297,7 @@
             pinHeader = "المساعد (" + cluster.timeShift + ")";
             borderColor = "#000";
           }
+          // Note: "employee" falls through here with default '...', which gets updated to a number later
 
           const html = buildInfoWindowHtml(cluster, pinHeader, color);
           const marker = createAdvancedMarker(pos, color, pinText, html, borderColor);
@@ -305,6 +316,7 @@
         const assistantAM = clusters.find(c => c.stopType === 'assistant' && c.timeShift === 'AM');
         const assistantPM = clusters.find(c => c.stopType === 'assistant' && c.timeShift === 'PM');
         
+        // Filter out start, end, and assistants to isolate "Students + Employees"
         const studentStops = clusters.filter(c => 
           c !== startPoint && c !== endPoint && c !== assistantAM && c !== assistantPM
         );
@@ -330,7 +342,7 @@
               const optimizedOrder = result.routes[0].waypoint_order;
               const sortedStudents = optimizedOrder.map(index => studentStops[index]);
 
-              // Rebuild full list in order: AssistantAM -> Students -> AssistantPM
+              // Rebuild full list in order: AssistantAM -> Students/Employees -> AssistantPM
               if (assistantAM) finalWaypoints.push(assistantAM);
               sortedStudents.forEach(s => finalWaypoints.push(s));
               if (assistantPM) finalWaypoints.push(assistantPM);
@@ -342,7 +354,7 @@
             }
           });
         } else {
-          // No students, just A -> B
+          // No students/employees, just A -> B
           if (assistantAM) finalWaypoints.push(assistantAM);
           if (assistantPM) finalWaypoints.push(assistantPM);
           drawFinalPolyline(dService, dRenderer, startPoint, endPoint, finalWaypoints, routeObj, resolve);
@@ -364,53 +376,23 @@
         if (status === "OK") {
           renderer.setDirections(result);
 
-          // 🔥 FIXED: Numbering Loop
-          // orderedStops contains the actual clusters in the visited order.
-          // We match them to the markers we created earlier.
-          
           let counter = 1;
           orderedStops.forEach((stopCluster) => {
-             // Only number students (skip Assistants)
+             // Only number students AND employees (skip Assistants)
              const isAssistant = stopCluster.stopType === 'assistant';
+             
              if (!isAssistant) {
                  const m = routeObj.markers.find(mark => 
-                    Math.abs(mark.position.lat - stopCluster.lat) < 0.0001 && 
-                    Math.abs(mark.position.lng - stopCluster.lng) < 0.0001
+                   Math.abs(mark.position.lat - stopCluster.lat) < 0.0001 && 
+                   Math.abs(mark.position.lng - stopCluster.lng) < 0.0001
                  );
                  
                  if (m && m.content) {
-                     // Create new pin content to update the number
-                     const oldPin = m.content; 
-                     // NOTE: We need to access the style from the existing pin element if possible, 
-                     // or just re-create it using the route color.
-                     // The routeObj doesn't store color directly, but we can infer or pass it.
-                     // A safer way is just updating glyphText if supported, but PinElement is immutable-ish.
-                     // Let's create a new PinElement.
-                     
-                     // Helper to find color:
-                     const bgColor = oldPin.style.getPropertyValue('--gm-pin-background') || '#1a73e8'; // Fallback
-                     
-                     // Actually, AdvancedMarkerElement content is a DOM node.
-                     // We can just set glyphText if we update the PinElement.
-                     // But accessing the internal PinElement is tricky.
-                     // Best practice: Re-create the PinElement.
-                     
-                     // We need the color. Let's assume we can get it from the legend or passed context.
-                     // Simpler: The marker border color was set to route color.
-                     
-                     const pinText = counter.toString();
-                     
-                     // We need to re-create the PinElement with the new text.
-                     // Since we are inside the closure, we don't easily have 'color'.
-                     // However, we can grab it from the marker's existing setup if we stored it.
-                     // Let's rely on the marker having the color.
-                     
-                     // Hack fix: We iterate `orderedStops` which aligns with `waypoints`.
-                     // `waypoints` index corresponds to legs.
-                     
-                     // Let's try direct property update (works in some versions):
-                     m.content.glyphText = pinText;
-                     
+                     // Update Glyph Text to Number
+                     // Since AdvancedMarkerElement.content is a DOM element (pin.element), 
+                     // we technically need to update the PinElement itself.
+                     // A safe hack for current Maps API versions:
+                     m.content.glyphText = counter.toString();
                      counter++;
                  }
              }
@@ -446,9 +428,6 @@
         gmpClickable: true
       });
       
-      // Store color for later updates
-      marker.userData = { color: color, borderColor: borderColor };
-
       marker.addListener("click", () => {
         infoWindow.setContent(html);
         infoWindow.open(map, marker);
@@ -456,14 +435,33 @@
       return marker;
     }
 
+    // 🔥 UPDATED: Now handles Employee data and new JSON keys
     function buildInfoWindowHtml(cluster, title, color) {
       let rows = cluster.items.map(x => {
-        let name = x.studentName || "طالب";
-        let details = (x.gradeName || "") + " " + (x.sectionName || "");
+        // Normalize keys (studentName vs display_name, etc)
+        const name = x.studentName || x.display_name || "مستخدم";
+        
+        // Determine type
+        const type = (x.stopType || x.stop_type || "").toLowerCase().trim();
+        
+        let details = "";
+        
+        if (type === 'employee') {
+            details = "موظف";
+        } else {
+            // Handle Grade/Section (camelCase or snake_case)
+            const g = x.gradeName || x.grade_name || "";
+            const s = x.sectionName || x.section_name || "";
+            if (g || s) {
+                details = `${g} - ${s}`;
+            }
+        }
+
         return `<div style="margin-bottom:6px; border-bottom:1px solid #eee; padding-bottom:4px;">
-                  <b>${name}</b><br><span style="font-size:12px; color:#555;">${details}</span>
+                 <b>${name}</b><br><span style="font-size:12px; color:#555;">${details}</span>
                 </div>`;
       }).join('');
+      
       return `<div style="color:black;text-align:right;direction:rtl;min-width:180px;">
                 <b style="color:${color}; font-size:14px;">${title}</b><hr>${rows}
               </div>`;
