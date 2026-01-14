@@ -248,7 +248,6 @@
                     const markerObj = window.routeMarkers.find(m => m.items.some(item => item.id === id));
                     
                     if (markerObj) {
-                        // 🔥 UPDATED: Check for Student OR Employee
                         const isPending = markerObj.items.some(s => 
                             (s.type === 'student' || s.type === 'employee') && 
                             s.status === 'pending' && 
@@ -275,7 +274,6 @@
                             const distToStop = google.maps.geometry.spherical.computeDistanceBetween(myLocObj, stopLoc);
                             
                             if (distToStop < APPROACH_RADIUS) {
-                                // 🔥 UPDATED: Include Employees in Alert
                                 const activeItems = targetMarker.items.filter(s => 
                                     (s.type === 'student' || s.type === 'employee') && 
                                     s.status === 'pending' && 
@@ -386,7 +384,7 @@
       currentShift = shift; 
       currentRouteType = routeType; 
 
-      // 💰 MONEY SAVER LOGIC STARTS HERE 💰
+      // 💰 MONEY SAVER LOGIC 💰
       const currentGeometrySignature = stops.map(s => `${s.id}_${s.lat}_${s.lng}_${s.isExcluded}`).join("|");
       const isStructureChanged = currentGeometrySignature !== lastGeometrySignature;
       lastGeometrySignature = currentGeometrySignature;
@@ -451,7 +449,6 @@
              // Students OR Employees
              validStopCounter++; 
              text = validStopCounter.toString();
-             // Check if anyone in this cluster is Pending
              const activeItems = cluster.items.filter(s => (s.type === 'student' || s.type === 'employee') && !s.isExcluded);
              const anyPending = activeItems.some(s => s.status === 'pending');
              if (activeItems.length > 0 && anyPending) color = "#d32f2f"; else color = "#388e3c"; 
@@ -465,7 +462,6 @@
               else if (s.status === 'dropped') { badgeColor = 'bg-green'; statusTxt = 'تم التنزيل'; }
               else if (s.isExcluded) { badgeColor = 'bg-gray'; statusTxt = 'مستبعد'; }
               
-              // 🔥 UPDATED: Show "Employee" if type is employee, else show Grade
               let details = s.grade || '';
               if (s.type === 'employee') details = 'موظف';
 
@@ -479,8 +475,14 @@
       // 3. DECIDE: API vs FREE
       if (clusters.length >= 2) {
           if (isStructureChanged) {
-              console.log("🔄 Route structure changed. Calling API ($)...");
-              calculateRoadRoute(clusters); // 💸 PAID CALL
+              // 🔥 OFFLINE PROTECTION 🔥
+              if (navigator.onLine === false) {
+                   console.log("⚠️ Offline detected. Skipping API. Using Linear Order.");
+                   calculateFallbackRoute(clusters);
+              } else {
+                   console.log("🔄 Route structure changed. Calling API ($)...");
+                   calculateRoadRoute(clusters); 
+              }
           } else {
               console.log("💰 Status update only. Skipping API call (Free). Restoring numbers.");
               restoreMarkerVisuals(); 
@@ -500,22 +502,42 @@
         window.orderedStopIds.forEach(id => {
              const markerObj = window.routeMarkers.find(m => m.items.some(item => item.id === id));
              if (!markerObj) return;
-             if (processedClusters.has(markerObj)) return; // Already numbered this cluster
+             if (processedClusters.has(markerObj)) return; 
              
              const isStart = markerObj.isStart;
              const isEnd = markerObj.isEnd;
              
              if (!isStart && !isEnd) {
-                 // 🔥 UPDATED: Include Employees
                  const activeItems = markerObj.items.filter(s => (s.type === 'student' || s.type === 'employee') && !s.isExcluded);
                  if (activeItems.length > 0) {
                      markerObj.pin.glyphText = visualCounter.toString();
-                     markerObj.marker.content = markerObj.pin.element; // Apply change
+                     markerObj.marker.content = markerObj.pin.element; 
                      visualCounter++;
                      processedClusters.add(markerObj);
                  }
              }
         });
+    }
+
+    // 🛡️ OFFLINE FALLBACK ROUTER
+    function calculateFallbackRoute(clusters) {
+       let orderedIds = [];
+       // Simple Order: Start -> Others -> End
+       const startPoint = clusters.find(c => c.isStart);
+       const endPoint = clusters.find(c => c.isEnd);
+       const others = clusters.filter(c => c !== startPoint && c !== endPoint);
+
+       if (startPoint) startPoint.items.forEach(i => orderedIds.push(i.id));
+       others.forEach(c => c.items.forEach(i => orderedIds.push(i.id)));
+       if (endPoint) endPoint.items.forEach(i => orderedIds.push(i.id));
+
+       // Update Visuals
+       window.orderedStopIds = orderedIds; 
+       restoreMarkerVisuals(); 
+       
+       // Alert the user that optimization failed but order is preserved
+       console.log("⚠️ Fallback Route Order Applied (Linear)");
+       sendToFlutter({ action: 'routeOrdered', orderedIds: orderedIds });
     }
 
     function calculateRoadRoute(clusters) {
@@ -551,7 +573,6 @@
                        Math.abs(m.lng - cluster.lng) < 0.00001
                    );
                    if (markerObj && markerObj.pin) {
-                       // 🔥 UPDATED: Include Employees in numbering
                        const activeItems = cluster.items.filter(s => (s.type === 'student' || s.type === 'employee') && !s.isExcluded);
                        if (activeItems.length > 0) {
                            markerObj.pin.glyphText = visualCounter.toString();
@@ -571,6 +592,10 @@
                updateRouteSummary((dist/1000).toFixed(1), Math.round(dur/60));
                window.orderedStopIds = orderedIds; 
                sendToFlutter({ action: 'routeOrdered', orderedIds: orderedIds });
+           } else {
+               // 🔥 API FAILED (e.g. Offline mid-request) -> FALLBACK
+               console.warn("❌ Routing API Failed (" + status + "). Reverting to Fallback.");
+               calculateFallbackRoute(clusters);
            }
        });
     }
