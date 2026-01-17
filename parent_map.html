@@ -40,11 +40,15 @@
   <div id="map"></div>
 
   <script>
+    // --- Config ---
     const MY_MAP_ID = "48c2bb983bd19c1c44d95cb7";
     const BUS_ICON_URL = "https://raedapplebanon-spec.github.io/route-map/school-bus_6122028.png";
-    const RECALCULATE_INTERVAL = 20000; 
+    
+    // 🧠 PHYSICS SETTINGS
+    const AVERAGE_SPEED_KMH = 25; // 25 km/h is realistic for a school bus with traffic
+    const RECALCULATE_INTERVAL = 5000; // Safe to run every 5s because it's FREE now!
 
-    let map, directionsService, directionsRenderer, staticRenderer;
+    let map, polyline;
     let busMarker = null;
     let mapReady = false;
     let pendingData = null;
@@ -67,20 +71,14 @@
           zoomControl: true
         });
 
-        directionsService = new google.maps.DirectionsService();
-        
-        directionsRenderer = new google.maps.DirectionsRenderer({
-            map: map,
-            suppressMarkers: true,
-            preserveViewport: true,
-            polylineOptions: { strokeColor: "#1a73e8", strokeOpacity: 0.9, strokeWeight: 6 }
-        });
-
-        staticRenderer = new google.maps.DirectionsRenderer({
-            map: map,
-            suppressMarkers: true,
-            preserveViewport: true,
-            polylineOptions: { strokeColor: "#9aa0a6", strokeOpacity: 0.5, strokeWeight: 4 }
+        // The Blue Line (Drawn manually now, for free)
+        polyline = new google.maps.Polyline({
+            path: [],
+            geodesic: true,
+            strokeColor: "#1a73e8",
+            strokeOpacity: 0.9,
+            strokeWeight: 6,
+            map: map
         });
 
         mapReady = true;
@@ -108,12 +106,23 @@
         if (myStops.length > 0) myTargetStop = myStops[myStops.length - 1]; 
         else myTargetStop = stops[stops.length - 1]; 
 
-        drawStaticRoute(stops);
-
+        // Draw initial pins
         if (window.myMarkers) window.myMarkers.forEach(m => m.map = null);
         window.myMarkers = [];
         stops.forEach(stop => { if (stop.isVisible) createMarker(stop); });
-        
+
+        // Draw grey static line (Full Route) - Low opacity
+        const fullPath = stops.map(s => ({ lat: s.lat, lng: s.lng }));
+        new google.maps.Polyline({
+            path: fullPath,
+            geodesic: true,
+            strokeColor: "#9aa0a6",
+            strokeOpacity: 0.5,
+            strokeWeight: 4,
+            map: map
+        });
+
+        // Fit bounds
         const bounds = new google.maps.LatLngBounds();
         stops.forEach(s => bounds.extend({ lat: s.lat, lng: s.lng }));
         map.fitBounds(bounds);
@@ -142,45 +151,19 @@
         const now = Date.now();
         if (now - lastCalcTime > RECALCULATE_INTERVAL) {
             lastCalcTime = now;
-            calculateDynamicRoute(busPos);
+            calculateLocalETA(busPos);
         }
     };
 
-    // --- HELPER: Count UNIQUE locations (Grouping within 20 meters) ---
-    function filterUniqueLocations(stops) {
-        if (!stops || stops.length === 0) return [];
-        
-        const uniqueStops = [];
-        
-        stops.forEach(stop => {
-            const stopLatLng = new google.maps.LatLng(stop.lat, stop.lng);
-            
-            // Check if this stop is close to any we already added
-            let isDuplicate = false;
-            for (const existing of uniqueStops) {
-                const existingLatLng = new google.maps.LatLng(existing.lat, existing.lng);
-                const dist = google.maps.geometry.spherical.computeDistanceBetween(stopLatLng, existingLatLng);
-                
-                // 🔥 TOLERANCE: 20 meters
-                if (dist < 20) { 
-                    isDuplicate = true;
-                    break; 
-                }
-            }
-            
-            if (!isDuplicate) {
-                uniqueStops.push(stop);
-            }
-        });
-        return uniqueStops;
-    }
-
-    function calculateDynamicRoute(busPos) {
+    // --- 🧠 THE FREE MATH ENGINE ---
+    function calculateLocalETA(busPos) {
         if (!myTargetStop || !allStops.length) return;
 
+        const busLatLng = new google.maps.LatLng(busPos.lat, busPos.lng);
+        
+        // 1. Find Closest Stop Index
         let closestIndex = -1;
         let minDistance = Infinity;
-        const busLatLng = new google.maps.LatLng(busPos.lat, busPos.lng);
 
         allStops.forEach((stop, index) => {
             const stopLatLng = new google.maps.LatLng(stop.lat, stop.lng);
@@ -197,104 +180,81 @@
             document.getElementById("eta-time-text").innerText = "وصلت";
             document.getElementById("eta-dist-text").innerText = "الحافلة تجاوزت الموقع";
             document.getElementById("eta-stops-text").innerText = "";
-            directionsRenderer.setDirections({ routes: [] });
+            polyline.setPath([]); 
             return;
         }
 
-        // 1. Get ALL raw stops in between
+        // 2. Build the Path (Bus -> Next Stop -> ... -> Target)
+        // This creates the "Blue Line" visually without API
+        const pathPoints = [];
+        pathPoints.push(busPos); // Start at Bus
+        
+        // Add all stops from closestIndex to targetIndex
+        // (We start from closestIndex because the bus is "at or near" it)
+        for (let i = closestIndex; i <= targetIndex; i++) {
+            pathPoints.push({ lat: allStops[i].lat, lng: allStops[i].lng });
+        }
+        
+        // Update Line
+        polyline.setPath(pathPoints);
+
+        // 3. Calculate Total Distance (Sum of Segments)
+        let totalDistanceMeters = 0;
+        for (let i = 0; i < pathPoints.length - 1; i++) {
+            const p1 = new google.maps.LatLng(pathPoints[i]);
+            const p2 = new google.maps.LatLng(pathPoints[i+1]);
+            totalDistanceMeters += google.maps.geometry.spherical.computeDistanceBetween(p1, p2);
+        }
+
+        // 4. Filter Unique Stops for Time Buffer
         const intermediateStopsRaw = allStops.slice(closestIndex, targetIndex);
-        
-        // 2. 🔥 DEDUPLICATE: Group students at same location
         const uniqueIntermediateStops = filterUniqueLocations(intermediateStopsRaw);
-        
-        // 3. Count buffer based on UNIQUE stops
         const uniqueStopsCount = uniqueIntermediateStops.length;
 
-        // 4. Use Unique stops for waypoints (Cleaner path, fewer API calls)
-        const waypoints = uniqueIntermediateStops.map(s => ({
-            location: { lat: s.lat, lng: s.lng },
-            stopover: false
-        }));
+        // 5. Physics Formula: Time = (Distance / Speed) + Stop Buffer
+        // Speed: 25 km/h = ~416 meters/minute
+        const speedMetersPerMin = (AVERAGE_SPEED_KMH * 1000) / 60; 
+        
+        const driveTimeMinutes = totalDistanceMeters / speedMetersPerMin;
+        const stopBufferMinutes = uniqueStopsCount * 1.0; // 1 min per stop
+        
+        const totalMinutes = Math.ceil(driveTimeMinutes + stopBufferMinutes);
+        const totalKm = (totalDistanceMeters / 1000).toFixed(1);
 
-        directionsService.route({
-            origin: busPos,
-            destination: { lat: myTargetStop.lat, lng: myTargetStop.lng },
-            waypoints: waypoints,
-            travelMode: google.maps.TravelMode.DRIVING,
-        }, (result, status) => {
-            if (status === "OK") {
-                directionsRenderer.setDirections(result);
-                
-                let driveTimeSec = 0;
-                let distanceMeters = 0;
-                result.routes[0].legs.forEach(leg => {
-                    driveTimeSec += leg.duration.value;
-                    distanceMeters += leg.distance.value;
-                });
-
-                // 🔥 FORMULA: Drive Time + (Unique Stops * 60s)
-                const stopBufferSec = uniqueStopsCount * 60;
-                const totalSeconds = driveTimeSec + stopBufferSec;
-                const totalMinutes = Math.ceil(totalSeconds / 60);
-                const totalKm = (distanceMeters / 1000).toFixed(1);
-
-                document.getElementById("eta-time-text").innerText = totalMinutes + " دقيقة";
-                document.getElementById("eta-dist-text").innerText = totalKm + " كم";
-                
-                if (uniqueStopsCount > 0) {
-                   document.getElementById("eta-stops-text").innerText = "يوجد " + uniqueStopsCount + " توقف قبل وصولك";
-                } else {
-                   document.getElementById("eta-stops-text").innerText = "أنت المحطة التالية!";
-                }
-
-            } else {
-                console.warn("Dynamic Route Failed", status);
-            }
-        });
+        // 6. Update UI
+        document.getElementById("eta-time-text").innerText = totalMinutes + " دقيقة";
+        document.getElementById("eta-dist-text").innerText = totalKm + " كم";
+        
+        if (uniqueStopsCount > 0) {
+            document.getElementById("eta-stops-text").innerText = "يوجد " + uniqueStopsCount + " توقف قبل وصولك";
+        } else {
+            document.getElementById("eta-stops-text").innerText = "أنت المحطة التالية!";
+        }
     }
 
-    function drawStaticRoute(stops) {
-        // We also filter waypoints here to avoid zigzagging for multiple kids at same house
-        const start = stops[0];
-        const end = stops[stops.length - 1];
-        
-        const rawWaypoints = stops.slice(1, -1);
-        const uniqueWaypoints = filterUniqueLocations(rawWaypoints);
-
-        const waypoints = uniqueWaypoints.map(s => ({ location: { lat: s.lat, lng: s.lng }, stopover: false }));
-
-        directionsService.route({
-            origin: { lat: start.lat, lng: start.lng },
-            destination: { lat: end.lat, lng: end.lng },
-            waypoints: waypoints,
-            travelMode: google.maps.TravelMode.DRIVING,
-        }, (result, status) => {
-            if (status === "OK") staticRenderer.setDirections(result);
+    function filterUniqueLocations(stops) {
+        if (!stops || stops.length === 0) return [];
+        const uniqueStops = [];
+        stops.forEach(stop => {
+            const stopLatLng = new google.maps.LatLng(stop.lat, stop.lng);
+            let isDuplicate = false;
+            for (const existing of uniqueStops) {
+                const existingLatLng = new google.maps.LatLng(existing.lat, existing.lng);
+                const dist = google.maps.geometry.spherical.computeDistanceBetween(stopLatLng, existingLatLng);
+                if (dist < 20) { isDuplicate = true; break; }
+            }
+            if (!isDuplicate) uniqueStops.push(stop);
         });
+        return uniqueStops;
     }
 
     function createMarker(stop) {
         let pinBackground = "#1a73e8"; 
         let glyphText = "🏠"; 
-
         if (stop.isStart) { pinBackground = "#00c853"; glyphText = "S"; }
         else if (stop.isEnd) { pinBackground = "#d50000"; glyphText = "E"; }
-
-        const pin = new google.maps.marker.PinElement({
-            background: pinBackground,
-            borderColor: "#FFFFFF",
-            glyphColor: "#FFFFFF",
-            glyphText: glyphText,
-            scale: 1.0
-        });
-
-        const marker = new google.maps.marker.AdvancedMarkerElement({
-            map: map,
-            position: { lat: stop.lat, lng: stop.lng },
-            content: pin.element,
-            title: stop.name
-        });
-        
+        const pin = new google.maps.marker.PinElement({ background: pinBackground, borderColor: "#FFFFFF", glyphColor: "#FFFFFF", glyphText: glyphText, scale: 1.0 });
+        const marker = new google.maps.marker.AdvancedMarkerElement({ map: map, position: { lat: stop.lat, lng: stop.lng }, content: pin.element, title: stop.name });
         window.myMarkers.push(marker);
     }
 
