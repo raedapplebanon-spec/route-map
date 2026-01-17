@@ -40,21 +40,19 @@
   <div id="map"></div>
 
   <script>
-    // --- Config ---
     const MY_MAP_ID = "48c2bb983bd19c1c44d95cb7";
     const BUS_ICON_URL = "https://raedapplebanon-spec.github.io/route-map/school-bus_6122028.png";
     
-    // 🧠 PHYSICS SETTINGS
-    const AVERAGE_SPEED_KMH = 25; // 25 km/h is realistic for a school bus with traffic
-    const RECALCULATE_INTERVAL = 5000; // Safe to run every 5s because it's FREE now!
-
-    let map, polyline;
+    let map, directionsService, activeRenderer, staticRenderer;
     let busMarker = null;
     let mapReady = false;
     let pendingData = null;
+    
     let allStops = [];
     let myTargetStop = null;
-    let lastCalcTime = 0;
+
+    // 🔥 LOCK VARIABLE: Ensures we calculate only ONCE
+    let hasCalculatedInitialRoute = false; 
 
     window.initMap = async function() {
       try {
@@ -71,14 +69,22 @@
           zoomControl: true
         });
 
-        // The Blue Line (Drawn manually now, for free)
-        polyline = new google.maps.Polyline({
-            path: [],
-            geodesic: true,
-            strokeColor: "#1a73e8",
-            strokeOpacity: 0.9,
-            strokeWeight: 6,
-            map: map
+        directionsService = new google.maps.DirectionsService();
+
+        // 1. Grey Line (Full Route Context)
+        staticRenderer = new google.maps.DirectionsRenderer({
+            map: map,
+            suppressMarkers: true,
+            preserveViewport: true,
+            polylineOptions: { strokeColor: "#9aa0a6", strokeOpacity: 0.5, strokeWeight: 5 }
+        });
+
+        // 2. Blue Line (Bus -> Home)
+        activeRenderer = new google.maps.DirectionsRenderer({
+            map: map,
+            suppressMarkers: true,
+            preserveViewport: true, // Don't zoom out when this draws
+            polylineOptions: { strokeColor: "#1a73e8", strokeOpacity: 0.9, strokeWeight: 6 }
         });
 
         mapReady = true;
@@ -102,37 +108,26 @@
         if (!stops || stops.length < 2) return;
         allStops = stops; 
         
+        // Find Parent's Stop
         const myStops = stops.filter(s => s.isVisible && !s.isStart && !s.isEnd);
         if (myStops.length > 0) myTargetStop = myStops[myStops.length - 1]; 
         else myTargetStop = stops[stops.length - 1]; 
 
-        // Draw initial pins
+        // Draw Pins
         if (window.myMarkers) window.myMarkers.forEach(m => m.map = null);
         window.myMarkers = [];
         stops.forEach(stop => { if (stop.isVisible) createMarker(stop); });
 
-        // Draw grey static line (Full Route) - Low opacity
-        const fullPath = stops.map(s => ({ lat: s.lat, lng: s.lng }));
-        new google.maps.Polyline({
-            path: fullPath,
-            geodesic: true,
-            strokeColor: "#9aa0a6",
-            strokeOpacity: 0.5,
-            strokeWeight: 4,
-            map: map
-        });
-
-        // Fit bounds
-        const bounds = new google.maps.LatLngBounds();
-        stops.forEach(s => bounds.extend({ lat: s.lat, lng: s.lng }));
-        map.fitBounds(bounds);
+        // Draw Grey Line (Static Route) Immediately
+        drawStaticRoute(stops);
     };
 
     window.updateBusLocation = function(lat, lng) {
         const busPos = { lat: lat, lng: lng };
-        document.getElementById("eta-box").style.display = "block";
-
+        
+        // 1. Move Bus Icon (Always happens)
         if (!busMarker) {
+            document.getElementById("eta-box").style.display = "block"; // Show box when bus appears
             const img = document.createElement("img");
             img.src = BUS_ICON_URL;
             img.style.width = "45px";
@@ -148,88 +143,105 @@
             busMarker.position = busPos;
         }
 
-        const now = Date.now();
-        if (now - lastCalcTime > RECALCULATE_INTERVAL) {
-            lastCalcTime = now;
-            calculateLocalETA(busPos);
+        // 2. Calculate Route & ETA (ONLY ONCE)
+        if (!hasCalculatedInitialRoute && myTargetStop) {
+            hasCalculatedInitialRoute = true; // 🔒 Lock it immediately
+            calculateOneTimeRoute(busPos);
         }
     };
 
-    // --- 🧠 THE FREE MATH ENGINE ---
-    function calculateLocalETA(busPos) {
-        if (!myTargetStop || !allStops.length) return;
-
-        const busLatLng = new google.maps.LatLng(busPos.lat, busPos.lng);
+    function calculateOneTimeRoute(busPos) {
+        // Logic: Calculate path from Bus Position (Right Now) -> Target Stop
         
-        // 1. Find Closest Stop Index
+        // Find intermediate stops for accuracy
         let closestIndex = -1;
         let minDistance = Infinity;
+        const busLatLng = new google.maps.LatLng(busPos.lat, busPos.lng);
 
         allStops.forEach((stop, index) => {
             const stopLatLng = new google.maps.LatLng(stop.lat, stop.lng);
             const dist = google.maps.geometry.spherical.computeDistanceBetween(busLatLng, stopLatLng);
-            if (dist < minDistance) {
-                minDistance = dist;
-                closestIndex = index;
-            }
+            if (dist < minDistance) { minDistance = dist; closestIndex = index; }
         });
 
         const targetIndex = allStops.indexOf(myTargetStop);
 
-        if (closestIndex > targetIndex) {
-            document.getElementById("eta-time-text").innerText = "وصلت";
-            document.getElementById("eta-dist-text").innerText = "الحافلة تجاوزت الموقع";
-            document.getElementById("eta-stops-text").innerText = "";
-            polyline.setPath([]); 
-            return;
+        // Prep Waypoints (Bus -> ... -> Target)
+        let waypoints = [];
+        if (closestIndex > -1 && closestIndex < targetIndex) {
+            // Get stops in between
+            const rawSlice = allStops.slice(closestIndex, targetIndex);
+            // Filter unique locations to optimize API waypoint limit
+            const uniqueSlice = filterUniqueLocations(rawSlice);
+            waypoints = uniqueSlice.map(s => ({ location: { lat: s.lat, lng: s.lng }, stopover: false }));
         }
 
-        // 2. Build the Path (Bus -> Next Stop -> ... -> Target)
-        // This creates the "Blue Line" visually without API
-        const pathPoints = [];
-        pathPoints.push(busPos); // Start at Bus
-        
-        // Add all stops from closestIndex to targetIndex
-        // (We start from closestIndex because the bus is "at or near" it)
-        for (let i = closestIndex; i <= targetIndex; i++) {
-            pathPoints.push({ lat: allStops[i].lat, lng: allStops[i].lng });
-        }
-        
-        // Update Line
-        polyline.setPath(pathPoints);
+        // Call API
+        directionsService.route({
+            origin: busPos,
+            destination: { lat: myTargetStop.lat, lng: myTargetStop.lng },
+            waypoints: waypoints,
+            travelMode: google.maps.TravelMode.DRIVING,
+        }, (result, status) => {
+            if (status === "OK") {
+                // Draw Blue Line
+                activeRenderer.setDirections(result);
+                
+                // Calculate ETA
+                let driveTimeSec = 0;
+                let distanceMeters = 0;
+                result.routes[0].legs.forEach(leg => {
+                    driveTimeSec += leg.duration.value;
+                    distanceMeters += leg.distance.value;
+                });
 
-        // 3. Calculate Total Distance (Sum of Segments)
-        let totalDistanceMeters = 0;
-        for (let i = 0; i < pathPoints.length - 1; i++) {
-            const p1 = new google.maps.LatLng(pathPoints[i]);
-            const p2 = new google.maps.LatLng(pathPoints[i+1]);
-            totalDistanceMeters += google.maps.geometry.spherical.computeDistanceBetween(p1, p2);
-        }
+                // Calculate Stops Buffer
+                // We assume waypoints length represents the number of stops
+                // (Since we filtered unique locations above)
+                const stopsCount = waypoints.length;
+                const stopBufferSec = stopsCount * 60; // 1 min per stop
 
-        // 4. Filter Unique Stops for Time Buffer
-        const intermediateStopsRaw = allStops.slice(closestIndex, targetIndex);
-        const uniqueIntermediateStops = filterUniqueLocations(intermediateStopsRaw);
-        const uniqueStopsCount = uniqueIntermediateStops.length;
+                const totalMinutes = Math.ceil((driveTimeSec + stopBufferSec) / 60);
+                const totalKm = (distanceMeters / 1000).toFixed(1);
 
-        // 5. Physics Formula: Time = (Distance / Speed) + Stop Buffer
-        // Speed: 25 km/h = ~416 meters/minute
-        const speedMetersPerMin = (AVERAGE_SPEED_KMH * 1000) / 60; 
-        
-        const driveTimeMinutes = totalDistanceMeters / speedMetersPerMin;
-        const stopBufferMinutes = uniqueStopsCount * 1.0; // 1 min per stop
-        
-        const totalMinutes = Math.ceil(driveTimeMinutes + stopBufferMinutes);
-        const totalKm = (totalDistanceMeters / 1000).toFixed(1);
+                // Set Text (Static)
+                document.getElementById("eta-time-text").innerText = totalMinutes + " دقيقة";
+                document.getElementById("eta-dist-text").innerText = totalKm + " كم";
+                
+                if (stopsCount > 0) {
+                     document.getElementById("eta-stops-text").innerText = "يوجد " + stopsCount + " توقف";
+                } else {
+                     document.getElementById("eta-stops-text").innerText = "أنت المحطة التالية";
+                }
+            } else {
+                console.warn("One-Time Route Failed", status);
+                document.getElementById("eta-dist-text").innerText = "تعذر الحساب";
+            }
+        });
+    }
 
-        // 6. Update UI
-        document.getElementById("eta-time-text").innerText = totalMinutes + " دقيقة";
-        document.getElementById("eta-dist-text").innerText = totalKm + " كم";
-        
-        if (uniqueStopsCount > 0) {
-            document.getElementById("eta-stops-text").innerText = "يوجد " + uniqueStopsCount + " توقف قبل وصولك";
-        } else {
-            document.getElementById("eta-stops-text").innerText = "أنت المحطة التالية!";
-        }
+    function drawStaticRoute(stops) {
+        const start = stops[0];
+        const end = stops[stops.length - 1];
+        // Use filtered waypoints for the grey line too
+        const rawWaypoints = stops.slice(1, -1);
+        const uniqueWaypoints = filterUniqueLocations(rawWaypoints);
+        const waypoints = uniqueWaypoints.map(s => ({ location: { lat: s.lat, lng: s.lng }, stopover: false }));
+
+        directionsService.route({
+            origin: { lat: start.lat, lng: start.lng },
+            destination: { lat: end.lat, lng: end.lng },
+            waypoints: waypoints,
+            travelMode: google.maps.TravelMode.DRIVING,
+        }, (result, status) => {
+            if (status === "OK") {
+                staticRenderer.setDirections(result);
+                // Fit bounds to full route
+                const bounds = new google.maps.LatLngBounds();
+                stops.forEach(s => bounds.extend({ lat: s.lat, lng: s.lng }));
+                map.fitBounds(bounds);
+            }
+        });
     }
 
     function filterUniqueLocations(stops) {
