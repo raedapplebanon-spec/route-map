@@ -78,6 +78,13 @@
     const MY_MAP_ID = "48c2bb983bd19c1c44d95cb7";
     const BUS_ICON_URL = "https://raedapplebanon-spec.github.io/route-map/school-bus_6122028.png"; 
 
+    // =========================================================
+    // ✅ 1. NEW ANIMATION VARIABLES
+    // =========================================================
+    let animationFrameId = null;
+    let animationStartTime = 0;
+    const ANIMATION_DURATION = 1000; // Slide takes 1 second (matches GPS update speed)
+
     function haversineDistance(lat1, lng1, lat2, lng2) {
       const R = 6371e3; 
       const toRad = x => x * Math.PI / 180;
@@ -222,18 +229,20 @@
         }, options);
     }
 
-    // ✅ NEW SHARED FUNCTION: Handles Bus Movement & Logic
-    // This runs whether the GPS comes from the Browser OR Flutter
+    // =========================================================
+    // ✅ 2. THE NEW "SMOOTH" UPDATE FUNCTION
+    // =========================================================
     function processLocationUpdate(lat, lng) {
          if (!lat || !lng) return;
 
-         const myLoc = { lat, lng };
-         const myLocObj = new google.maps.LatLng(lat, lng);
+         const newLoc = { lat: lat, lng: lng };
+         const newLocObj = new google.maps.LatLng(lat, lng);
 
+         // A. First Time Setup (Instant Create)
          if (!userLocationMarker) {
              userLocationMarker = new google.maps.Marker({
                  map: map,
-                 position: myLoc,
+                 position: newLoc, 
                  icon: { url: BUS_ICON_URL, scaledSize: new google.maps.Size(40, 40), anchor: new google.maps.Point(20, 20) },
                  title: "حافلة المدرسة",
                  zIndex: 999
@@ -242,18 +251,58 @@
              radarCircle = new google.maps.Circle({
                  strokeColor: "#1a73e8", strokeOpacity: 0.8, strokeWeight: 2,
                  fillColor: "#1a73e8", fillOpacity: 0.15,
-                 map: map, center: myLoc, radius: APPROACH_RADIUS 
+                 map: map, center: newLoc, radius: APPROACH_RADIUS 
              });
+             
              map.setZoom(15); 
              isBusTrackingActive = true; 
-         } else {
-             userLocationMarker.setPosition(myLoc);
-             if (radarCircle) radarCircle.setCenter(myLoc);
-         }
-         
-         if (isBusTrackingActive) map.panTo(myLoc); 
+             return;
+         } 
 
-         // ... Radar & Arrival Logic ...
+         // B. The Magic: Start Sliding 🚌💨
+         // Cancel any slide currently running so we don't fight
+         if (animationFrameId) cancelAnimationFrame(animationFrameId);
+         
+         // Slide from CURRENT visible position to NEW target
+         const startPos = userLocationMarker.getPosition(); 
+         animateMarker(startPos, newLocObj);
+
+         // Update Radar (Instant is fine for radar)
+         if (radarCircle) radarCircle.setCenter(newLoc);
+         if (isBusTrackingActive) map.panTo(newLoc); 
+
+         // C. Check Stops & Alerts (Moved to separate function to keep code clean)
+         checkArrivalLogic(newLocObj); 
+    }
+
+    // =========================================================
+    // ✅ 3. THE ANIMATION HELPER (60 FPS Slider)
+    // =========================================================
+    function animateMarker(startLatLng, targetLatLng) {
+        animationStartTime = Date.now();
+        
+        function step() {
+            const elapsed = Date.now() - animationStartTime;
+            const progress = Math.min(elapsed / ANIMATION_DURATION, 1); // 0.0 to 1.0
+
+            // Calculate the point between start and end
+            const currentLat = startLatLng.lat() + (targetLatLng.lat() - startLatLng.lat()) * progress;
+            const currentLng = startLatLng.lng() + (targetLatLng.lng() - startLatLng.lng()) * progress;
+            const currentPos = new google.maps.LatLng(currentLat, currentLng);
+
+            userLocationMarker.setPosition(currentPos); // Move tiny amount
+
+            if (progress < 1) {
+                animationFrameId = requestAnimationFrame(step); // Keep going until finished
+            }
+        }
+        step();
+    }
+
+    // =========================================================
+    // ✅ 4. LOGIC HANDLER (Separated for cleanliness)
+    // =========================================================
+    function checkArrivalLogic(myLocObj) {
          if (window.orderedStopIds && window.orderedStopIds.length > 0) {
              let firstPendingIndex = -1;
              for (let i = 0; i < window.orderedStopIds.length; i++) {
