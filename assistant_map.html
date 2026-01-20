@@ -79,11 +79,11 @@
     const BUS_ICON_URL = "https://raedapplebanon-spec.github.io/route-map/school-bus_6122028.png"; 
 
     // =========================================================
-    // ✅ 1. NEW ANIMATION VARIABLES
+    // ✅ 1. ANIMATION VARIABLES
     // =========================================================
     let animationFrameId = null;
     let animationStartTime = 0;
-    const ANIMATION_DURATION = 1000; // Slide takes 1 second (matches GPS update speed)
+    const ANIMATION_DURATION = 1000; 
 
     function haversineDistance(lat1, lng1, lat2, lng2) {
       const R = 6371e3; 
@@ -195,7 +195,6 @@
         startLocationTracking();
         mapReady = true;
         
-        // Notify Flutter we are ready
         sendToFlutter({ action: 'mapIsReady' });
         console.log("✅ Assistant Map Initialized");
 
@@ -221,7 +220,6 @@
         }
         const options = { enableHighAccuracy: true, maximumAge: 0, timeout: 10000 };
 
-        // Listen to Browser GPS (for testing/backup)
         locationWatchId = navigator.geolocation.watchPosition((pos) => {
              processLocationUpdate(pos.coords.latitude, pos.coords.longitude);
         }, (err) => {
@@ -230,7 +228,7 @@
     }
 
     // =========================================================
-    // ✅ 2. THE NEW "SMOOTH" UPDATE FUNCTION
+    // ✅ 2. THE SMOOTH UPDATE FUNCTION
     // =========================================================
     function processLocationUpdate(lat, lng) {
          if (!lat || !lng) return;
@@ -238,7 +236,6 @@
          const newLoc = { lat: lat, lng: lng };
          const newLocObj = new google.maps.LatLng(lat, lng);
 
-         // A. First Time Setup (Instant Create)
          if (!userLocationMarker) {
              userLocationMarker = new google.maps.Marker({
                  map: map,
@@ -259,48 +256,42 @@
              return;
          } 
 
-         // B. The Magic: Start Sliding 🚌💨
-         // Cancel any slide currently running so we don't fight
          if (animationFrameId) cancelAnimationFrame(animationFrameId);
          
-         // Slide from CURRENT visible position to NEW target
          const startPos = userLocationMarker.getPosition(); 
          animateMarker(startPos, newLocObj);
 
-         // Update Radar (Instant is fine for radar)
          if (radarCircle) radarCircle.setCenter(newLoc);
          if (isBusTrackingActive) map.panTo(newLoc); 
 
-         // C. Check Stops & Alerts (Moved to separate function to keep code clean)
          checkArrivalLogic(newLocObj); 
     }
 
     // =========================================================
-    // ✅ 3. THE ANIMATION HELPER (60 FPS Slider)
+    // ✅ 3. THE ANIMATION HELPER
     // =========================================================
     function animateMarker(startLatLng, targetLatLng) {
         animationStartTime = Date.now();
         
         function step() {
             const elapsed = Date.now() - animationStartTime;
-            const progress = Math.min(elapsed / ANIMATION_DURATION, 1); // 0.0 to 1.0
+            const progress = Math.min(elapsed / ANIMATION_DURATION, 1);
 
-            // Calculate the point between start and end
             const currentLat = startLatLng.lat() + (targetLatLng.lat() - startLatLng.lat()) * progress;
             const currentLng = startLatLng.lng() + (targetLatLng.lng() - startLatLng.lng()) * progress;
             const currentPos = new google.maps.LatLng(currentLat, currentLng);
 
-            userLocationMarker.setPosition(currentPos); // Move tiny amount
+            userLocationMarker.setPosition(currentPos);
 
             if (progress < 1) {
-                animationFrameId = requestAnimationFrame(step); // Keep going until finished
+                animationFrameId = requestAnimationFrame(step);
             }
         }
         step();
     }
 
     // =========================================================
-    // ✅ 4. LOGIC HANDLER (Separated for cleanliness)
+    // ✅ 4. LOGIC HANDLER (FIXED FOR DUPLICATES)
     // =========================================================
     function checkArrivalLogic(myLocObj) {
          if (window.orderedStopIds && window.orderedStopIds.length > 0) {
@@ -310,11 +301,12 @@
                  const markerObj = window.routeMarkers.find(m => m.items.some(item => item.id === id));
                  
                  if (markerObj) {
+                     // Filter out students we ALREADY alerted
                      const isPending = markerObj.items.some(s => 
                          (s.type === 'student' || s.type === 'employee') && 
                          s.status === 'pending' && 
                          !s.isExcluded &&
-                         !window.alertedStudentIds.has(s.id) 
+                         !window.alertedStudentIds.has(s.id) // <--- THIS SAVES US
                      );
                      if (isPending) { firstPendingIndex = i; break; }
                  }
@@ -340,17 +332,19 @@
                                  (s.type === 'student' || s.type === 'employee') && 
                                  s.status === 'pending' && 
                                  !s.isExcluded &&
-                                 !window.alertedStudentIds.has(s.id)
+                                 !window.alertedStudentIds.has(s.id) // Double check before adding
                              );
                              
                              if (activeItems.length > 0) {
-                                 activeItems.forEach(s => window.alertedStudentIds.add(s.id)); 
+                                 activeItems.forEach(s => window.alertedStudentIds.add(s.id)); // 🛑 ADD TO LOCK IMMEDIATELY
                                  batchIds.push(...activeItems.map(i => i.id));
                                  const namesAtThisStop = activeItems.map(s => s.name).join(" & ");
                                  batchNames.push(namesAtThisStop);
                                  console.log("➕ Adding to batch: " + namesAtThisStop);
                              }
                          } else {
+                             // If the first stop in sequence is far, don't check the next ones.
+                             // This prevents alerting Stop #5 when we are still far from Stop #1.
                              break; 
                          }
                      }
@@ -411,13 +405,11 @@
          }
     }
 
-    // ✅ FIXED LISTENER: Now catches "updateDriverLocation"
     window.addEventListener("message", function (event) {
       if (!event.data) return;
       let data = event.data;
       if (typeof data === 'string') { try { data = JSON.parse(data); } catch(e){} }
       
-      // Case 1: Set Route
       if (data.action === "setDriverRoute") {
           const stops = data.stops || [];
           const shift = data.shift || "AM"; 
@@ -426,18 +418,19 @@
           else window.pendingData = { stops: stops, shift: shift, routeType: routeType };
       }
       
-      // Case 2: Update Location (From Flutter)
       if (data.action === "updateDriverLocation") {
-          console.log("📍 JS: Moving Bus to " + data.lat + ", " + data.lng);
           processLocationUpdate(parseFloat(data.lat), parseFloat(data.lng));
       }
     });
 
     window.setRouteData = function(stops, shift, routeType) {
-      // 🔒 LOCK RESET LOGIC
-      const newSignature = shift + "_" + routeType + "_" + (stops.length > 0 ? stops[0].id : "");
+      // 🔒 LOCK FIX: REMOVED ID FROM SIGNATURE 
+      // Only reset locks if Shift or Route Type changes. 
+      // Re-ordering stops or changing status should NOT clear memory.
+      const newSignature = shift + "_" + routeType; 
+      
       if (newSignature !== lastRouteSignature) {
-          console.log("🔄 New Route Detected. Resetting Locks.");
+          console.log("🔄 Totally New Shift Detected. Resetting Locks.");
           window.alertedStudentIds.clear();
           hasTriggeredArrival = false; 
           hasLeftStartZone = false;
@@ -447,16 +440,13 @@
       currentShift = shift; 
       currentRouteType = routeType; 
 
-      // 💰 MONEY SAVER LOGIC 💰
       const currentGeometrySignature = stops.map(s => `${s.id}_${s.lat}_${s.lng}_${s.isExcluded}`).join("|");
       const isStructureChanged = currentGeometrySignature !== lastGeometrySignature;
       lastGeometrySignature = currentGeometrySignature;
 
-      // 1. CLEAR OLD MARKERS (Visuals only)
       window.routeMarkers.forEach(obj => obj.marker.map = null);
       window.routeMarkers = [];
 
-      // Only clear the blue line if the route path actually changed!
       if (isStructureChanged) {
         directionsRenderer.setDirections({ routes: [] });
         document.getElementById("route-summary").style.display = "none";
@@ -470,21 +460,20 @@
       pmLastStudentLocation = null;
 
       const addMarker = (cluster, color, text, html) => {
-         const pin = new google.maps.marker.PinElement({ background: color, borderColor: "#FFFFFF", glyphColor: "#FFFFFF", glyphText: text });
-         const marker = new google.maps.marker.AdvancedMarkerElement({ map: map, position: { lat: cluster.lat, lng: cluster.lng }, content: pin.element });
-         marker.addListener("click", () => { infoWindow.setContent(html); infoWindow.open(map, marker); });
-         
-         const isAlreadyTriggered = cluster.items.some(s => window.alertedStudentIds.has(s.id));
-         
-         window.routeMarkers.push({
-             marker, pin, names: cluster.items.map(i => i.name || ""), html, lat: cluster.lat, lng: cluster.lng,
-             isStart: cluster.isStart, isEnd: cluster.isEnd, items: cluster.items, hasTriggeredApproach: isAlreadyTriggered 
-         });
+          const pin = new google.maps.marker.PinElement({ background: color, borderColor: "#FFFFFF", glyphColor: "#FFFFFF", glyphText: text });
+          const marker = new google.maps.marker.AdvancedMarkerElement({ map: map, position: { lat: cluster.lat, lng: cluster.lng }, content: pin.element });
+          marker.addListener("click", () => { infoWindow.setContent(html); infoWindow.open(map, marker); });
+          
+          const isAlreadyTriggered = cluster.items.some(s => window.alertedStudentIds.has(s.id));
+          
+          window.routeMarkers.push({
+              marker, pin, names: cluster.items.map(i => i.name || ""), html, lat: cluster.lat, lng: cluster.lng,
+              isStart: cluster.isStart, isEnd: cluster.isEnd, items: cluster.items, hasTriggeredApproach: isAlreadyTriggered 
+          });
       };
 
       let validStopCounter = 0; 
 
-      // 2. RE-DRAW MARKERS (Colors update automatically here)
       clusters.forEach((cluster) => {
           const pos = { lat: cluster.lat, lng: cluster.lng };
           bounds.extend(pos);
@@ -509,7 +498,6 @@
               color = "#9C27B0"; text = "A"; header = "المرافق"; 
           }
           else {
-              // Students OR Employees
               validStopCounter++; 
               text = validStopCounter.toString();
               const activeItems = cluster.items.filter(s => (s.type === 'student' || s.type === 'employee') && !s.isExcluded);
@@ -535,10 +523,8 @@
           addMarker(cluster, color, text, html);
       });
 
-      // 3. DECIDE: API vs FREE
       if (clusters.length >= 2) {
           if (isStructureChanged) {
-              // 🔥 OFFLINE PROTECTION 🔥
               if (navigator.onLine === false) {
                     console.log("⚠️ Offline detected. Skipping API. Using Linear Order.");
                     calculateFallbackRoute(clusters);
@@ -555,7 +541,6 @@
       if (!isBusTrackingActive && !bounds.isEmpty()) map.fitBounds(bounds);
     };
 
-    // 💰 MONEY SAVER HELPER: Restores numbers without asking Google
     function restoreMarkerVisuals() {
         if (!window.orderedStopIds || window.orderedStopIds.length === 0) return;
         
@@ -582,10 +567,8 @@
         });
     }
 
-    // 🛡️ OFFLINE FALLBACK ROUTER
     function calculateFallbackRoute(clusters) {
        let orderedIds = [];
-       // Simple Order: Start -> Others -> End
        const startPoint = clusters.find(c => c.isStart);
        const endPoint = clusters.find(c => c.isEnd);
        const others = clusters.filter(c => c !== startPoint && c !== endPoint);
@@ -594,12 +577,9 @@
        others.forEach(c => c.items.forEach(i => orderedIds.push(i.id)));
        if (endPoint) endPoint.items.forEach(i => orderedIds.push(i.id));
 
-       // Update Visuals
        window.orderedStopIds = orderedIds; 
        restoreMarkerVisuals(); 
        
-       // Alert the user that optimization failed but order is preserved
-       console.log("⚠️ Fallback Route Order Applied (Linear)");
        sendToFlutter({ action: 'routeOrdered', orderedIds: orderedIds });
     }
 
@@ -656,7 +636,6 @@
                window.orderedStopIds = orderedIds; 
                sendToFlutter({ action: 'routeOrdered', orderedIds: orderedIds });
            } else {
-               // 🔥 API FAILED (e.g. Offline mid-request) -> FALLBACK
                console.warn("❌ Routing API Failed (" + status + "). Reverting to Fallback.");
                calculateFallbackRoute(clusters);
            }
