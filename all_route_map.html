@@ -262,6 +262,7 @@
     }
 
     // --- SINGLE ROUTE PROCESSOR ---
+    // --- SINGLE ROUTE PROCESSOR (FIXED) ---
     function processSingleRoute(routeId, rawPoints, color, bounds) {
       return new Promise((resolve) => {
         
@@ -278,90 +279,120 @@
         const routeObj = { renderer: dRenderer, markers: [], routeId: routeId };
         window.activeRoutes.push(routeObj);
 
-        // Draw Markers (Initial Pass)
+        // 1. Draw Markers (Visuals)
         clusters.forEach(cluster => {
           if (cluster.hideMarker) return;
           const pos = { lat: cluster.lat, lng: cluster.lng };
           bounds.extend(pos);
 
-          let pinText = "..."; // Default placeholder
+          let pinText = "..."; 
           let pinHeader = "نقطة توقف";
           let borderColor = color;
 
-          if (cluster.isStart) {
-            pinText = "S"; pinHeader = "نقطة البداية"; borderColor = "#000";
-          } else if (cluster.isFinal) {
-            pinText = "E"; pinHeader = "نقطة النهاية"; borderColor = "#000";
-          } else if (cluster.stopType === 'assistant') {
+          // 🔥 VISUAL PRIORITY: Check Assistant FIRST so they get "A" even if they are the Start
+          if (cluster.stopType === 'assistant') {
             pinText = cluster.timeShift === 'AM' ? "A" : "P";
             pinHeader = "المساعد (" + cluster.timeShift + ")";
-            borderColor = "#000";
+            borderColor = "#000"; // Black border for VIPs
+          } 
+          else if (cluster.isStart) {
+            pinText = "S"; pinHeader = "نقطة البداية"; borderColor = "#000";
+          } 
+          else if (cluster.isFinal) {
+            pinText = "E"; pinHeader = "نقطة النهاية"; borderColor = "#000";
           }
-          // Note: "employee" falls through here with default '...', which gets updated to a number later
 
           const html = buildInfoWindowHtml(cluster, pinHeader, color);
           const marker = createAdvancedMarker(pos, color, pinText, html, borderColor);
           routeObj.markers.push(marker);
         });
 
-        // Optimization & Numbering
+        // 2. Routing Logic (Simplified)
         const startPoint = clusters.find(c => c.isStart);
         const endPoint = clusters.find(c => c.isFinal);
 
+        // If missing anchors, we can't route
         if (!startPoint || !endPoint) {
           resolve(); 
           return;
         }
 
-        const assistantAM = clusters.find(c => c.stopType === 'assistant' && c.timeShift === 'AM');
-        const assistantPM = clusters.find(c => c.stopType === 'assistant' && c.timeShift === 'PM');
-        
-        // Filter out start, end, and assistants to isolate "Students + Employees"
-        const studentStops = clusters.filter(c => 
-          c !== startPoint && c !== endPoint && c !== assistantAM && c !== assistantPM
-        );
+        // 🔥 LOGIC FIX: Just grab everything BETWEEN Start and End
+        // We do NOT look for assistants specifically anymore. Dart handled that.
+        const middleStops = clusters.filter(c => c !== startPoint && c !== endPoint);
 
-        const virtualOrigin = assistantAM || startPoint;
-        const virtualDest = assistantPM || endPoint;
-
-        let finalWaypoints = [];
-        let waypointsForAPI = [];
-
-        if (studentStops.length > 0) {
-          waypointsForAPI = studentStops.map(s => ({ location: { lat: s.lat, lng: s.lng }, stopover: true }));
+        if (middleStops.length > 0) {
+          const waypointsForAPI = middleStops.map(s => ({ location: { lat: s.lat, lng: s.lng }, stopover: true }));
           
           dService.route({
-            origin: { lat: virtualOrigin.lat, lng: virtualOrigin.lng },
-            destination: { lat: virtualDest.lat, lng: virtualDest.lng },
+            origin: { lat: startPoint.lat, lng: startPoint.lng },
+            destination: { lat: endPoint.lat, lng: endPoint.lng },
             waypoints: waypointsForAPI,
             travelMode: google.maps.TravelMode.DRIVING,
-            optimizeWaypoints: true,
+            optimizeWaypoints: true, // Let Google Shuffle the middle
           }, (result, status) => {
             if (status === "OK") {
-              // Get sorted sequence
+              // Get sorted sequence of the MIDDLE stops
               const optimizedOrder = result.routes[0].waypoint_order;
-              const sortedStudents = optimizedOrder.map(index => studentStops[index]);
-
-              // Rebuild full list in order: AssistantAM -> Students/Employees -> AssistantPM
-              if (assistantAM) finalWaypoints.push(assistantAM);
-              sortedStudents.forEach(s => finalWaypoints.push(s));
-              if (assistantPM) finalWaypoints.push(assistantPM);
+              const sortedMiddleStops = optimizedOrder.map(index => middleStops[index]);
 
               // Draw Line & Number Pins
-              drawFinalPolyline(dService, dRenderer, startPoint, endPoint, finalWaypoints, routeObj, resolve);
+              drawFinalPolyline(dService, dRenderer, startPoint, endPoint, sortedMiddleStops, routeObj, resolve);
             } else {
+              console.error("Routing Failed:", status);
               resolve();
             }
           });
         } else {
-          // No students/employees, just A -> B
-          if (assistantAM) finalWaypoints.push(assistantAM);
-          if (assistantPM) finalWaypoints.push(assistantPM);
-          drawFinalPolyline(dService, dRenderer, startPoint, endPoint, finalWaypoints, routeObj, resolve);
+          // No middle stops, just Start -> End
+          drawFinalPolyline(dService, dRenderer, startPoint, endPoint, [], routeObj, resolve);
         }
       });
     }
 
+    // --- DRAWER (FIXED) ---
+    function drawFinalPolyline(service, renderer, start, end, sortedMiddleStops, routeObj, onComplete) {
+      
+      // 🔥 FIX: Waypoints must ONLY be the middle stops. 
+      // Do NOT add Start/End here, or Google visits them twice.
+      const waypoints = sortedMiddleStops.map(s => ({ location: { lat: s.lat, lng: s.lng }, stopover: true }));
+
+      service.route({
+        origin: { lat: start.lat, lng: start.lng },
+        destination: { lat: end.lat, lng: end.lng },
+        waypoints: waypoints,
+        travelMode: google.maps.TravelMode.DRIVING,
+        optimizeWaypoints: false, // Order is already sorted above
+      }, (result, status) => {
+        if (status === "OK") {
+          renderer.setDirections(result);
+
+          // Numbering Logic
+          let counter = 1;
+          sortedMiddleStops.forEach((stopCluster) => {
+             // We only number the MIDDLE stops (Students/Employees)
+             // Assistants/Start/End already have letters (A, S, E)
+             
+             // Safety check: Don't number the assistant if they ended up in the middle (unlikely now)
+             const isAssistant = stopCluster.stopType === 'assistant';
+             
+             if (!isAssistant) {
+                 const m = routeObj.markers.find(mark => 
+                   Math.abs(mark.position.lat - stopCluster.lat) < 0.0001 && 
+                   Math.abs(mark.position.lng - stopCluster.lng) < 0.0001
+                 );
+                 
+                 if (m && m.content) {
+                     // Update the Pin Text to 1, 2, 3...
+                     m.content.glyphText = counter.toString();
+                     counter++;
+                 }
+             }
+          });
+        }
+        onComplete();
+      });
+    }
     function drawFinalPolyline(service, renderer, start, end, orderedStops, routeObj, onComplete) {
       // Prepare waypoints for the drawing call (excluding start/end)
       const waypoints = orderedStops.map(s => ({ location: { lat: s.lat, lng: s.lng }, stopover: true }));
