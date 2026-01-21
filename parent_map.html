@@ -80,6 +80,15 @@
 
         isMapInit = true;
         console.log("✅ Parent Map Ready");
+
+        // 🔥 NOTIFY FLUTTER: The map is ready to receive student pins now
+        const readyPayload = { action: "mapIsReady" };
+        if (window.chrome && window.chrome.webview) {
+            window.chrome.webview.postMessage(readyPayload); // Mobile
+        } else if (window.parent) {
+            window.parent.postMessage(readyPayload, "*"); // Web
+        }
+
       } catch (e) {
         console.error("❌ Init Error: ", e);
       }
