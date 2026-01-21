@@ -5,34 +5,45 @@
   <title>Parent Tracking Map</title>
   <style>
     html, body, #map { height: 100%; margin: 0; padding: 0; font-family: 'Segoe UI', sans-serif; }
-    #eta-container {
-      position: absolute; top: 10px; right: 10px; background: white; padding: 12px 16px;
-      border-radius: 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); z-index: 10;
-      display: none; text-align: right; border: 1px solid #eee;
-    }
-    .eta-text { font-size: 14px; font-weight: bold; color: #1a73e8; }
     
     /* 🔥 SMOOTH SLIDING CSS */
     .bus-marker-container {
       transition: all 1.5s linear; 
       pointer-events: none;
     }
+
+    /* 🎯 RECENTER BUTTON CSS */
+    .custom-map-control {
+      background-color: #fff;
+      border: 0;
+      border-radius: 8px;
+      box-shadow: 0 2px 6px rgba(0,0,0,.3);
+      cursor: pointer;
+      margin: 10px;
+      padding: 8px 12px;
+      font-size: 14px;
+      font-weight: bold;
+      color: #1a73e8;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+    .custom-map-control:hover { background-color: #f8f9fa; }
   </style>
 </head>
 <body>
 
-  <div id="eta-container">
-    <div id="eta-content" class="eta-text">جاري تحديد موقع الباص...</div>
-  </div>
   <div id="map"></div>
 
   <script>
     let map;
     let busMarker;
     let studentMarkers = {};
-    let connectionLine;
     let isMapInit = false;
     let AdvancedMarkerElement, PinElement;
+    
+    // Track if the user has manually moved the map
+    let isUserPanned = false;
 
     // --- 1. INITIALIZATION ---
     async function initMap() {
@@ -47,11 +58,25 @@
           zoom: 15,
           mapId: "48c2bb983bd19c1c44d95cb7",
           disableDefaultUI: false, 
-          mapTypeControl: true,    // ✅ SATELLITE TOGGLE
+          mapTypeControl: true,
           zoomControl: true,
           streetViewControl: false,
           fullscreenControl: false
         });
+
+        // Add the Recenter Button to the UI
+        const recenterBtn = document.createElement("button");
+        recenterBtn.innerHTML = "🎯 إعادة ضبط العرض";
+        recenterBtn.classList.add("custom-map-control");
+        recenterBtn.addEventListener("click", () => {
+          isUserPanned = false;
+          recenterView();
+        });
+
+        map.controls[google.maps.ControlPosition.RIGHT_BOTTOM].push(recenterBtn);
+
+        // Detect if user starts dragging the map
+        map.addListener("dragstart", () => { isUserPanned = true; });
 
         isMapInit = true;
         console.log("✅ Parent Map Ready");
@@ -60,24 +85,34 @@
       }
     }
 
-    // --- 2. HELPERS ---
-    function calculateETA(lat1, lon1, lat2, lon2) {
-      const R = 6371;
-      const dLat = (lat2 - lat1) * Math.PI / 180;
-      const dLon = (lon2 - lon1) * Math.PI / 180;
-      const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
-                Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon/2) * Math.sin(dLon/2);
-      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-      const distance = R * c; 
-      const timeMinutes = Math.round((distance / 25) * 60) + 2;
-      return { dist: distance.toFixed(2), min: timeMinutes < 2 ? 2 : timeMinutes, rawDist: distance };
+    // --- 2. CAMERA/RECENTER LOGIC ---
+    function recenterView() {
+      if (!isMapInit) return;
+      
+      const bounds = new google.maps.LatLngBounds();
+      let hasPoints = false;
+
+      if (busMarker && busMarker.position) {
+        bounds.extend(busMarker.position);
+        hasPoints = true;
+      }
+
+      Object.values(studentMarkers).forEach(m => {
+        bounds.extend(m.position);
+        hasPoints = true;
+      });
+
+      if (hasPoints) {
+        map.fitBounds(bounds, { padding: 100 });
+      }
     }
 
+    // --- 3. BRIDGE FUNCTION ---
     window.handleDirectUpdate = function(lat, lng) {
       updateBusUI({ lat: lat, lng: lng });
     };
 
-    // --- 3. SHARED UI UPDATE LOGIC ---
+    // --- 4. SHARED UI UPDATE LOGIC ---
     function updateBusUI(data) {
       if (!isMapInit) return;
       
@@ -103,46 +138,19 @@
         busMarker.position = busPos;
       }
 
-      const bounds = new google.maps.LatLngBounds();
-      bounds.extend(busPos);
-      Object.values(studentMarkers).forEach(m => bounds.extend(m.position));
-
-      const firstId = Object.keys(studentMarkers)[0];
-      if (firstId) {
-        const sPos = studentMarkers[firstId].position;
-        const eta = calculateETA(busPos.lat, busPos.lng, sPos.lat, sPos.lng);
-        
-        document.getElementById("eta-container").style.display = "block";
-        document.getElementById("eta-content").innerHTML = `🚍 الباص على بعد ${eta.dist} كم (${eta.min} دقيقة)`;
-
-        if (connectionLine) connectionLine.setMap(null);
-        connectionLine = new google.maps.Polyline({
-          path: [busPos, sPos],
-          geodesic: true,
-          strokeColor: "#1a73e8",
-          strokeOpacity: 0,
-          icons: [{
-            icon: { path: 'M 0,-1 0,1', strokeOpacity: 1, scale: 2 },
-            offset: '0',
-            repeat: '10px'
-          }],
-          map: map
-        });
-
-        if (eta.rawDist > 0.3) {
-           map.fitBounds(bounds, { padding: 80 });
-        }
+      // Only auto-fit if the user hasn't manually panned away
+      if (!isUserPanned) {
+        recenterView();
       }
     }
 
-    // --- 4. MESSAGE LISTENERS ---
+    // --- 5. MESSAGE LISTENERS ---
     window.addEventListener("message", async (event) => {
       const data = event.data;
       if (!data || !isMapInit) return;
 
       if (data.action === "initParentMap") {
         const myMarkers = data.myMarkers || [];
-        const bounds = new google.maps.LatLngBounds();
 
         myMarkers.forEach(m => {
           const pos = { lat: parseFloat(m.lat), lng: parseFloat(m.lng) };
@@ -155,9 +163,9 @@
               title: m.name
             });
           }
-          bounds.extend(pos);
         });
-        if (myMarkers.length > 0) map.fitBounds(bounds);
+        
+        recenterView();
       }
 
       if (data.action === "updateBusLocation") {
