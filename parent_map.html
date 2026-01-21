@@ -6,17 +6,9 @@
   <style>
     html, body, #map { height: 100%; margin: 0; padding: 0; font-family: 'Segoe UI', sans-serif; }
     #eta-container {
-      position: absolute;
-      top: 10px;
-      right: 10px;
-      background: white;
-      padding: 12px 16px;
-      border-radius: 10px;
-      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-      z-index: 10;
-      display: none;
-      text-align: right;
-      border: 1px solid #eee;
+      position: absolute; top: 10px; right: 10px; background: white; padding: 12px 16px;
+      border-radius: 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); z-index: 10;
+      display: none; text-align: right; border: 1px solid #eee;
     }
     .eta-text { font-size: 14px; font-weight: bold; color: #1a73e8; }
   </style>
@@ -26,7 +18,6 @@
   <div id="eta-container">
     <div id="eta-content" class="eta-text">جاري تحديد موقع الباص...</div>
   </div>
-  
   <div id="map"></div>
 
   <script>
@@ -34,60 +25,49 @@
     let busMarker;
     let studentMarkers = {};
     let isMapInit = false;
-    let AdvancedMarkerElement; // Store the class here
+    let AdvancedMarkerElement, PinElement;
 
-    const BUS_ICON_URL = "https://cdn-icons-png.flaticon.com/512/3448/3448339.png";
+    // Use a simpler icon URL or standard pin
+    const BUS_ICON_URL = "https://maps.google.com/mapfiles/kml/shapes/bus.png";
 
-    // --- 1. MODERN ASYNC INIT ---
     async function initMap() {
       try {
         const { Map } = await google.maps.importLibrary("maps");
         const markerLib = await google.maps.importLibrary("marker");
         AdvancedMarkerElement = markerLib.AdvancedMarkerElement;
+        PinElement = markerLib.PinElement;
 
         map = new Map(document.getElementById("map"), {
           center: { lat: 33.8938, lng: 35.5018 },
           zoom: 15,
-          mapId: "48c2bb983bd19c1c44d95cb7", // Your Map ID
+          mapId: "48c2bb983bd19c1c44d95cb7",
           disableDefaultUI: true,
           zoomControl: true
         });
 
         isMapInit = true;
-        console.log("✅ Map Initialized");
+        console.log("✅ Parent Map Ready");
       } catch (e) {
-        console.error("❌ Map Init Error: ", e);
+        console.error("❌ Init Error: ", e);
       }
     }
 
-    // --- 2. MATH: HAVERSINE ETA ---
     function calculateETA(lat1, lon1, lat2, lon2) {
-      const R = 6371; // Radius in km
+      const R = 6371;
       const dLat = (lat2 - lat1) * Math.PI / 180;
       const dLon = (lon2 - lon1) * Math.PI / 180;
       const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
                 Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon/2) * Math.sin(dLon/2);
       const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
       const distance = R * c; 
-
-      // Speed estimate: 25 km/h + buffer
       const timeMinutes = Math.round((distance / 25) * 60) + 2;
-      
-      return {
-        dist: distance.toFixed(1),
-        min: timeMinutes < 2 ? 2 : timeMinutes
-      };
+      return { dist: distance.toFixed(2), min: timeMinutes < 2 ? 2 : timeMinutes };
     }
 
-    // --- 3. MESSAGE LISTENER ---
     window.addEventListener("message", async (event) => {
       const data = event.data;
-      if (!data) return;
+      if (!data || !isMapInit) return;
 
-      // Wait for map if not ready
-      if (!isMapInit) return;
-
-      // ACTION: SETUP STUDENT PINS
       if (data.action === "initParentMap") {
         const myMarkers = data.myMarkers || [];
         const bounds = new google.maps.LatLngBounds();
@@ -95,63 +75,56 @@
         myMarkers.forEach(m => {
           const pos = { lat: parseFloat(m.lat), lng: parseFloat(m.lng) };
           if (!studentMarkers[m.id]) {
-            studentMarkers[m.id] = new AdvancedMarkerElement({
+             // Create Student Pin
+             const pin = new PinElement({ background: "#00c853", glyphColor: "white" });
+             studentMarkers[m.id] = new AdvancedMarkerElement({
               map: map,
               position: pos,
+              content: pin.element,
               title: m.name
             });
           }
           bounds.extend(pos);
         });
-
         if (myMarkers.length > 0) map.fitBounds(bounds);
       }
 
-      // ACTION: LIVE BUS MOVEMENT
       if (data.action === "updateBusLocation") {
-        const busPos = { lat: parseFloat(data.lat), lng: parseFloat(data.lng) };
+        const lat = parseFloat(data.lat);
+        const lng = parseFloat(data.lng);
+        console.log("📍 Bus Movement Received:", lat, lng); // CHECK YOUR CONSOLE
 
-        // 1. Create or Move the Bus Marker
+        if (isNaN(lat) || isNaN(lng)) return;
+        const busPos = { lat, lng };
+
         if (!busMarker) {
-          const busImg = document.createElement("img");
-          busImg.src = BUS_ICON_URL;
-          busImg.style.width = "42px";
+          // Fallback: If icon fails, show a yellow pin
+          const busPin = new PinElement({ background: "#FBBC04", glyphText: "🚌" });
           busMarker = new AdvancedMarkerElement({
             map: map,
             position: busPos,
-            content: busImg,
-            zIndex: 1000 // Ensure bus is above student pins
+            content: busPin.element,
+            zIndex: 1000
           });
         } else {
           busMarker.position = busPos;
         }
 
-        // 2. 🔥 AUTO-ZOOM: Ensure both Bus and Student are visible
+        // Auto-Zoom to keep both in view
         const bounds = new google.maps.LatLngBounds();
-        bounds.extend(busPos); // Add Bus to view
-        
-        // Add all student pins to the view
-        Object.values(studentMarkers).forEach(m => {
-          bounds.extend(m.position);
-        });
+        bounds.extend(busPos);
+        Object.values(studentMarkers).forEach(m => bounds.extend(m.position));
 
-        // Only fit bounds if we have students and a bus
         if (Object.keys(studentMarkers).length > 0) {
-          map.fitBounds(bounds, {
-            padding: { top: 100, bottom: 50, left: 50, right: 50 } // Add space so markers aren't touching edges
-          });
+          map.fitBounds(bounds, { padding: 80 });
         }
 
-        // 3. Calculate ETA
         const firstId = Object.keys(studentMarkers)[0];
         if (firstId) {
           const sPos = studentMarkers[firstId].position;
           const eta = calculateETA(busPos.lat, busPos.lng, sPos.lat, sPos.lng);
-          
-          const container = document.getElementById("eta-container");
-          container.style.display = "block";
-          document.getElementById("eta-content").innerHTML = 
-            `🚍 الباص على بعد ${eta.dist} كم (${eta.min} دقيقة تقريباً)`;
+          document.getElementById("eta-container").style.display = "block";
+          document.getElementById("eta-content").innerHTML = `🚍 الباص على بعد ${eta.dist} كم (${eta.min} دقيقة)`;
         }
       }
     });
@@ -159,8 +132,7 @@
 
   <script 
     src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCYaJ4Gjq36mq8swYgjNXOYr5mKZi45niA&libraries=marker,geometry&v=weekly&loading=async&callback=initMap" 
-    async 
-    defer>
+    async defer>
   </script>
 </body>
 </html>
