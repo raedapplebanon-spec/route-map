@@ -165,8 +165,13 @@
 
     window.addEventListener("message", function (event) {
       if (!event.data || event.data.action !== "setRouteData") return;
+      
       const routeData = event.data.routeData || [];
       const availableData = event.data.availableData || [];
+      
+      // ✅ 1. SAVE HEADER INFO GLOBALLY
+      window.lastRouteHeader = event.data.routeHeader || { assistantLocationRequired: false, routeShift: "AM" };
+
       if (mapReady) window.setRouteData(routeData, availableData);
       else window.pendingData = { route: routeData, available: availableData };
     });
@@ -277,103 +282,130 @@
     };
 
     function calculateRoadRoute(clusters) {
-       const startPoint = clusters.find(c => c.isStart);
-       const endPoint = clusters.find(c => c.isFinal);
-       if (!startPoint || !endPoint) return;
-
-       const assistants = clusters.filter(c => c.stopType === 'assistant');
-       // Employees are treated as students for routing, so they fall into this filter naturally
-       const studentStops = clusters.filter(c => c !== startPoint && c !== endPoint && c.stopType !== 'assistant');
+       // 1. Get Visual Start/End (Green/Red Pins)
+       // These remain the visual anchors no matter what happens below.
+       let originCluster = clusters.find(c => c.isStart);
+       let destinationCluster = clusters.find(c => c.isFinal);
        
-       let waypoints = [
-           ...assistants.map(a => ({ location: {lat: a.lat, lng: a.lng}, stopover: true })),
-           ...studentStops.map(s => ({ location: {lat: s.lat, lng: s.lng}, stopover: true }))
-       ];
+       if (!originCluster || !destinationCluster) return;
 
+       // 2. Extract Groups
+       const assistants = clusters.filter(c => c.stopType === 'assistant');
+       const studentStops = clusters.filter(c => c !== originCluster && c !== destinationCluster && c.stopType !== 'assistant');
+
+       // 3. Prepare Base Waypoints
+       let waypointsClusters = [...assistants, ...studentStops];
+       
+       // 4. LOGIC: The "Virtual Anchor" Strategy
+       // Read the header we saved in Step 1
+       const header = window.lastRouteHeader || { assistantLocationRequired: false, routeShift: "AM" };
+
+       // ✅ Logic: If Assistant Required -> Modify Start or End
+       if (header.assistantLocationRequired && assistants.length > 0) {
+           const assistantStop = assistants[0]; 
+           
+           // Remove assistant from "Waypoints" (Because they become the Start or End)
+           waypointsClusters = waypointsClusters.filter(c => c !== assistantStop);
+
+           if (header.routeShift === "AM") {
+               // AM: Start at Assistant -> End at School (Red Pin)
+               originCluster = assistantStop; 
+           } else {
+               // PM: Start at School (Green Pin) -> End at Assistant
+               destinationCluster = assistantStop;
+           }
+       }
+
+       // 5. Convert to Google API Format
+       const googleWaypoints = waypointsClusters.map(c => ({
+           location: { lat: c.lat, lng: c.lng },
+           stopover: true
+       }));
+
+       // 6. Send to Google
        directionsService.route({
-           origin: { lat: startPoint.lat, lng: startPoint.lng },
-           destination: { lat: endPoint.lat, lng: endPoint.lng },
-           waypoints: waypoints, travelMode: google.maps.TravelMode.DRIVING, optimizeWaypoints: true,
+           origin: { lat: originCluster.lat, lng: originCluster.lng },
+           destination: { lat: destinationCluster.lat, lng: destinationCluster.lng },
+           waypoints: googleWaypoints, 
+           travelMode: google.maps.TravelMode.DRIVING, 
+           optimizeWaypoints: true, // Google shuffles the students
        }, (result, status) => {
            if (status === "OK") {
                const optimizedOrder = result.routes[0].waypoint_order;
-               const finalWaypoints = optimizedOrder.map(index => waypoints[index]);
-               renderFinalRoute(startPoint, endPoint, finalWaypoints);
+               const finalWaypoints = optimizedOrder.map(index => googleWaypoints[index]);
+               
+               // ✅ Pass the result directly to the renderer (No 2nd API call needed)
+               renderFinalRoute(originCluster, destinationCluster, finalWaypoints, result);
            }
        });
     }
 
-    function renderFinalRoute(start, end, waypoints) {
-      directionsService.route({
-        origin: { lat: start.lat, lng: start.lng },
-        destination: { lat: end.lat, lng: end.lng },
-        waypoints: waypoints,
-        travelMode: google.maps.TravelMode.DRIVING,
-        optimizeWaypoints: false,
-      }, (result, status) => {
-        if (status === "OK") {
-            directionsRenderer.setDirections(result);
-            const legs = result.routes[0].legs; 
-            
-            let visualCounter = 1;
+    function renderFinalRoute(start, end, waypoints, result) {
+        // ✅ 1. Draw the Blue Line immediately (using the result from calculation)
+        directionsRenderer.setDirections(result);
+        
+        const legs = result.routes[0].legs; 
+        
+        // ✅ 2. Run the Safety Audit (Logic unchanged)
+        let visualCounter = 1;
 
-            waypoints.forEach((wp, index) => {
-                const legIndex = index; 
-                if (legIndex >= legs.length) return;
+        waypoints.forEach((wp, index) => {
+            const legIndex = index; 
+            if (legIndex >= legs.length) return;
 
-                const snappedLoc = legs[legIndex].end_location; 
-                const originalLoc = wp.location; 
+            const snappedLoc = legs[legIndex].end_location; 
+            const originalLoc = wp.location; 
 
-                const markerObj = window.routeMarkers.find(m => 
-                    Math.abs(m.lat - originalLoc.lat) < 0.0001 && 
-                    Math.abs(m.lng - originalLoc.lng) < 0.0001
+            const markerObj = window.routeMarkers.find(m => 
+                Math.abs(m.lat - originalLoc.lat) < 0.0001 && 
+                Math.abs(m.lng - originalLoc.lng) < 0.0001
+            );
+
+            if (markerObj && markerObj.pin) {
+                const isAssistant = markerObj.html.includes("المساعد");
+                if (!isAssistant) {
+                    markerObj.pin.glyphText = visualCounter.toString();
+                    markerObj.marker.content = markerObj.pin.element;
+                    visualCounter++;
+                }
+
+                const distance = google.maps.geometry.spherical.computeDistanceBetween(
+                    new google.maps.LatLng(originalLoc.lat, originalLoc.lng),
+                    snappedLoc
                 );
 
-                if (markerObj && markerObj.pin) {
-                    const isAssistant = markerObj.html.includes("المساعد");
-                    if (!isAssistant) {
-                        markerObj.pin.glyphText = visualCounter.toString();
-                        markerObj.marker.content = markerObj.pin.element;
-                        visualCounter++;
-                    }
+                if (distance > SNAP_THRESHOLD) {
+                    markerObj.pin.background = "#d32f2f"; 
+                    markerObj.pin.borderColor = "#b71c1c";
+                    markerObj.pin.glyphText = "⚠️"; 
+                    markerObj.pin.glyphColor = "white";
+                    markerObj.marker.content = markerObj.pin.element; 
+                    
+                    const walkLine = new google.maps.Polyline({
+                        path: [{lat: originalLoc.lat, lng: originalLoc.lng}, snappedLoc],
+                        geodesic: true,
+                        strokeColor: "#d32f2f",
+                        strokeOpacity: 0,
+                        strokeWeight: 2,
+                        icons: [{ icon: { path: 'M 0,-1 0,1', strokeOpacity: 1, scale: 2 }, offset: '0', repeat: '10px' }],
+                        map: map
+                    });
+                    window.walkLines.push(walkLine);
 
-                    const distance = google.maps.geometry.spherical.computeDistanceBetween(
-                        new google.maps.LatLng(originalLoc.lat, originalLoc.lng),
-                        snappedLoc
-                    );
-
-                    if (distance > SNAP_THRESHOLD) {
-                        markerObj.pin.background = "#d32f2f"; 
-                        markerObj.pin.borderColor = "#b71c1c";
-                        markerObj.pin.glyphText = "⚠️"; 
-                        markerObj.pin.glyphColor = "white";
-                        markerObj.marker.content = markerObj.pin.element; 
-                        
-                        const walkLine = new google.maps.Polyline({
-                            path: [{lat: originalLoc.lat, lng: originalLoc.lng}, snappedLoc],
-                            geodesic: true,
-                            strokeColor: "#d32f2f",
-                            strokeOpacity: 0,
-                            strokeWeight: 2,
-                            icons: [{ icon: { path: 'M 0,-1 0,1', strokeOpacity: 1, scale: 2 }, offset: '0', repeat: '10px' }],
-                            map: map
-                        });
-                        window.walkLines.push(walkLine);
-
-                        let warningHtml = `<div style="background:#ffebee; color:#c62828; padding:5px; border-radius:4px; margin-bottom:5px; font-size:12px; border:1px solid #ef9a9a;">⚠️ <b>تنبيه:</b> الحافلة تتوقف على بعد ${Math.round(distance)}م</div>`;
-                        if (!markerObj.html.includes("تنبيه:")) {
-                             markerObj.html = markerObj.html.replace('<hr>', `<hr>${warningHtml}`);
-                        }
+                    let warningHtml = `<div style="background:#ffebee; color:#c62828; padding:5px; border-radius:4px; margin-bottom:5px; font-size:12px; border:1px solid #ef9a9a;">⚠️ <b>تنبيه:</b> الحافلة تتوقف على بعد ${Math.round(distance)}م</div>`;
+                    if (!markerObj.html.includes("تنبيه:")) {
+                            markerObj.html = markerObj.html.replace('<hr>', `<hr>${warningHtml}`);
                     }
                 }
-            });
+            }
+        });
 
-            let dist = 0, dur = 0;
-            legs.forEach(l => { dist += l.distance.value; dur += l.duration.value; });
-            updateRouteSummary((dist / 1000).toFixed(1), Math.round(dur / 60));
-        }
-      });
+        // ✅ 3. Update Summary Stats
+        let dist = 0, dur = 0;
+        legs.forEach(l => { dist += l.distance.value; dur += l.duration.value; });
+        updateRouteSummary((dist / 1000).toFixed(1), Math.round(dur / 60));
     }
   </script>
 </body>
 </html>
+
