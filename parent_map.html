@@ -1,174 +1,125 @@
 <!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
-  <meta charset="UTF-8" />
-  <title>Parent Map</title>
-
+  <meta charset="UTF-8">
+  <title>Parent Tracking Map</title>
   <style>
-    html, body { height: 100%; margin: 0; padding: 0; overflow: hidden; font-family: 'Segoe UI', Tahoma, sans-serif; }
-    #map { height: 100%; width: 100%; }
+    html, body, #map { height: 100%; margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+    #eta-container {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      background: white;
+      padding: 10px 15px;
+      border-radius: 8px;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+      z-index: 10;
+      display: none;
+      text-align: right;
+    }
+    .eta-text { font-size: 14px; font-weight: bold; color: #1a73e8; }
   </style>
-
-  <script
-    src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCYaJ4Gjq36mq8swYgjNXOYr5mKZi45niA&callback=initMap&libraries=marker,geometry&loading=async&v=weekly"
-    async defer>
-  </script>
+  <script src="https://maps.googleapis.com/maps/api/js?key=YOUR_GOOGLE_KEY&libraries=marker,geometry&v=weekly"></script>
 </head>
-
 <body>
+
+  <div id="eta-container">
+    <div id="eta-content" class="eta-text">جاري حساب الوقت...</div>
+  </div>
   <div id="map"></div>
 
   <script>
-    const BUS_ICON_URL = "https://raedapplebanon-spec.github.io/route-map/school-bus_6122028.png";
-    const CHILD_ICON_COLOR = "#00c853";
-
-    // ✅ Camera behavior
-    const BUS_FOCUS_ZOOM = 16;
-    const FOLLOW_BUS = true;
-
     let map;
-    let busMarker = null;
-    let childMarkers = [];
-    let myStopsData = [];
+    let busMarker;
+    let studentMarkers = {};
+    let isMapInit = false;
 
-    // If bus updates arrive before map is ready
-    let pendingBus = null;
+    const BUS_ICON = "https://cdn-icons-png.flaticon.com/512/3448/3448339.png"; // Custom Bus Icon
 
-    // Animation
-    let animationFrameId = null;
-    let animationStartTime = 0;
-    const ANIMATION_DURATION = 1000;
-
-    window.initMap = async function() {
-      const { Map } = await google.maps.importLibrary("maps");
-      await google.maps.importLibrary("marker");
-
-      map = new Map(document.getElementById("map"), {
+    function initMap() {
+      map = new google.maps.Map(document.getElementById("map"), {
         center: { lat: 33.8938, lng: 35.5018 },
-        zoom: 12,
-        mapId: "48c2bb983bd19c1c44d95cb7",
-        mapTypeControl: false,
-        streetViewControl: false,
-        fullscreenControl: false,
+        zoom: 15,
+        mapId: "PARENT_MAP_ID",
+        disableDefaultUI: true,
+        zoomControl: true
       });
+      isMapInit = true;
+    }
 
-      // Apply any early bus update
-      if (pendingBus) {
-        updateBusPosition(pendingBus.lat, pendingBus.lng);
-        pendingBus = null;
-      }
+    // --- Math: Free ETA Calculation ---
+    function calculateETA(lat1, lon1, lat2, lon2) {
+      const R = 6371; // Earth radius in km
+      const dLat = (lat2 - lat1) * Math.PI / 180;
+      const dLon = (lon2 - lon1) * Math.PI / 180;
+      const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+                Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon/2) * Math.sin(dLon/2);
+      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+      const distance = R * c; // Distance in km
 
-      sendToFlutter({ action: 'mapIsReady' });
-    };
+      // Assume average city bus speed is 25 km/h
+      const timeHours = distance / 25;
+      const timeMinutes = Math.round(timeHours * 60) + 2; // Add 2 min buffer for stops/traffic
+      
+      return {
+        dist: distance.toFixed(1),
+        min: timeMinutes < 1 ? 1 : timeMinutes
+      };
+    }
 
-    window.addEventListener("message", function(event) {
-      if (!event.data) return;
+    window.addEventListener("message", (event) => {
+      const data = event.data;
+      if (!data || !isMapInit) return;
 
-      let data = event.data;
-      if (typeof data === 'string') {
-        try { data = JSON.parse(data); } catch (e) {}
-      }
-
+      // 1. Initial Setup (Pins for Students)
       if (data.action === "initParentMap") {
         const myMarkers = data.myMarkers || [];
-        myStopsData = myMarkers;
-        drawMyChildren(myMarkers); // ✅ only draw student markers (no fit)
+        const bounds = new google.maps.LatLngBounds();
+
+        myMarkers.forEach(m => {
+          const pos = { lat: parseFloat(m.lat), lng: parseFloat(m.lng) };
+          if (!studentMarkers[m.id]) {
+            studentMarkers[m.id] = new google.maps.marker.AdvancedMarkerElement({
+              map: map,
+              position: pos,
+              title: m.name
+            });
+          }
+          bounds.extend(pos);
+        });
+        if (myMarkers.length > 0) map.fitBounds(bounds);
       }
 
+      // 2. Live Bus Movement
       if (data.action === "updateBusLocation") {
-        // console.log("🚌 bus update:", data.lat, data.lng); // optional debug
-        updateBusPosition(data.lat, data.lng);
+        const busPos = { lat: parseFloat(data.lat), lng: parseFloat(data.lng) };
+
+        if (!busMarker) {
+          const busImg = document.createElement("img");
+          busImg.src = BUS_ICON;
+          busImg.style.width = "40px";
+          busMarker = new google.maps.marker.AdvancedMarkerElement({
+            map: map,
+            position: busPos,
+            content: busImg
+          });
+        } else {
+          busMarker.position = busPos;
+        }
+
+        // Calculate ETA to the first student in the list
+        const firstStudentId = Object.keys(studentMarkers)[0];
+        if (firstStudentId) {
+          const studentPos = studentMarkers[firstStudentId].position;
+          const eta = calculateETA(busPos.lat, busPos.lng, studentPos.lat, studentPos.lng);
+          
+          document.getElementById("eta-container").style.display = "block";
+          document.getElementById("eta-content").innerHTML = `الباص على بعد ${eta.dist} كم (${eta.min} دقيقة تقريباً)`;
+        }
       }
     });
 
-    async function drawMyChildren(markersData) {
-      childMarkers.forEach(m => { m.map = null; });
-      childMarkers = [];
-
-      const { AdvancedMarkerElement, PinElement } = await google.maps.importLibrary("marker");
-
-      markersData.forEach(child => {
-        const lat = parseFloat(child.lat);
-        const lng = parseFloat(child.lng);
-        if (!isFinite(lat) || !isFinite(lng)) return;
-
-        const pin = new PinElement({
-          background: CHILD_ICON_COLOR,
-          borderColor: "#ffffff",
-          glyphColor: "#ffffff",
-          scale: 1.1
-        });
-
-        const marker = new AdvancedMarkerElement({
-          map: map,
-          position: { lat, lng },
-          content: pin.element,
-          title: child.name || "موقع الطالب",
-        });
-
-        childMarkers.push(marker);
-      });
-    }
-
-    function updateBusPosition(lat, lng) {
-      if (!map || !window.google || !google.maps) {
-        pendingBus = { lat, lng };
-        return;
-      }
-
-      const nLat = parseFloat(lat);
-      const nLng = parseFloat(lng);
-      if (!isFinite(nLat) || !isFinite(nLng)) return;
-
-      const newPos = new google.maps.LatLng(nLat, nLng);
-
-      if (!busMarker) {
-        busMarker = new google.maps.Marker({
-          map: map,
-          position: newPos,
-          icon: {
-            url: BUS_ICON_URL,
-            scaledSize: new google.maps.Size(45, 45),
-            anchor: new google.maps.Point(22.5, 22.5),
-          },
-          zIndex: 1000
-        });
-
-        // ✅ Focus on bus first time
-        map.setCenter(newPos);
-        map.setZoom(BUS_FOCUS_ZOOM);
-        return;
-      }
-
-      // ✅ Follow bus on every update (optional)
-      if (FOLLOW_BUS) map.panTo(newPos);
-
-      if (animationFrameId) cancelAnimationFrame(animationFrameId);
-      const startPos = busMarker.getPosition();
-      animateMarker(startPos, newPos);
-    }
-
-    function animateMarker(startLatLng, targetLatLng) {
-      animationStartTime = Date.now();
-
-      function step() {
-        const elapsed = Date.now() - animationStartTime;
-        const progress = Math.min(elapsed / ANIMATION_DURATION, 1);
-
-        const currentLat = startLatLng.lat() + (targetLatLng.lat() - startLatLng.lat()) * progress;
-        const currentLng = startLatLng.lng() + (targetLatLng.lng() - startLatLng.lng()) * progress;
-
-        busMarker.setPosition(new google.maps.LatLng(currentLat, currentLng));
-
-        if (progress < 1) animationFrameId = requestAnimationFrame(step);
-      }
-      step();
-    }
-
-    function sendToFlutter(payload) {
-      if (window.FlutterChan) window.FlutterChan.postMessage(JSON.stringify(payload));
-      else window.parent.postMessage(payload, "*");
-    }
+    google.maps.event.addDomListener(window, 'load', initMap);
   </script>
 </body>
 </html>
