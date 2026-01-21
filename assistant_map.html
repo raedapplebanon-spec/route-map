@@ -1,638 +1,1343 @@
 <!DOCTYPE html>
+
 <html lang="ar" dir="rtl">
+
 <head>
+
   <meta charset="UTF-8" />
-  <title>Assistant Route Map (Stable v13)</title>
+
+  <title>Assistant Route Map</title>
+
   
+
   <style>
+
     html, body { height: 100%; margin: 0; padding: 0; overflow: hidden; font-family: 'Segoe UI', Tahoma, sans-serif; }
+
     #map { height: 100%; width: 100%; }
+
     #pac-input { display: none; background-color: #fff; font-family: 'Segoe UI', Tahoma, sans-serif; font-size: 15px; font-weight: 400; margin: 10px; padding: 0 13px; width: 300px; height: 40px; border: 1px solid #dadce0; border-radius: 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.3); outline: none; }
+
     .route-summary { display: none; background: white; padding: 14px 18px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.2); font-size: 14px; line-height: 1.5; direction: rtl; text-align: right; min-width: 160px; border: 1px solid #eee; margin-left: 10px; margin-bottom: 25px; }
+
     .route-summary h3 { color: #1a73e8; border-bottom: 1px solid #eee; padding-bottom: 5px; margin: 0 0 8px 0; font-size: 15px; }
+
     .legend { display: none; background: rgba(255, 255, 255, 0.95); padding: 10px 14px; border-radius: 8px; font-size: 12px; box-shadow: 0 2px 6px rgba(0,0,0,0.25); margin-bottom: 25px; margin-right: 10px; min-width: 140px; }
+
     .legend-row { display: flex; align-items: center; margin-bottom: 6px; }
+
     .legend-color { width: 14px; height: 14px; border-radius: 50%; margin-left: 6px; }
+
     .status-badge { font-size: 11px; padding: 2px 6px; border-radius: 4px; color: white; display: inline-block; margin-left: 5px; }
+
     .bg-red { background-color: #d32f2f; }
+
     .bg-green { background-color: #388e3c; }
+
     .bg-blue { background-color: #1976D2; }
+
     .bg-gray { background-color: #757575; }
+
   </style>
 
+
+
   <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCYaJ4Gjq36mq8swYgjNXOYr5mKZi45niA&callback=initMap&libraries=marker,places,geometry&loading=async&v=weekly" async defer></script>
+
 </head>
 
+
+
 <body>
+
   <input id="pac-input" type="text" placeholder="ابحث عن عنوان أو اسم طالب..." />
+
   
+
   <div id="legend" class="legend">
+
     <div class="legend-row"><div class="legend-color" style="background:#00c853"></div><span>البداية</span></div>
+
     <div class="legend-row"><div class="legend-color" style="background:#d50000"></div><span>النهاية</span></div>
+
     <div class="legend-row"><div class="legend-color" style="background:#9C27B0"></div><span>المرافق</span></div>
+
     <div class="legend-row"><div class="legend-color" style="background:#d32f2f"></div><span>قيد الانتظار</span></div>
+
     <div class="legend-row"><div class="legend-color" style="background:#388e3c"></div><span>مكتمل</span></div>
+
     <div class="legend-row"><div class="legend-color" style="background:#757575"></div><span>مستبعد</span></div>
+
   </div>
 
+
+
   <div id="route-summary" class="route-summary">
+
     <h3>📍 ملخص الجولة</h3>
+
     <div id="summary-text">—</div>
+
   </div>
+
+
 
   <div id="map"></div>
 
+
+
   <script>
+
     // --- Globals ---
+
     window.routeMarkers = [];
+
     
-    // 🔒 LOCK 1: Prevents Student Alert Spam (FIXED)
-    // We only clear this if the SHIFT changes, not every update.
+
+    // 🔒 LOCK 1: Prevents Student Alert Spam
+
     window.alertedStudentIds = new Set(); 
+
     
+
     let map, directionsService, directionsRenderer, infoWindow;
+
     let mapReady = false;
+
     let currentShift = "AM"; 
+
     let currentRouteType = "first_morning"; 
 
+
+
     // State Logic
+
     let startStopLocation = null; 
+
     let endStopLocation = null; 
+
     let pmLastStudentLocation = null; 
+
     
+
+    // 🔒 LOCK 2: Prevents Arrival Spam
+
     let hasTriggeredArrival = false;
+
     let hasLeftStartZone = false; 
 
-    // Signature Logic
+
+
+    // 🔒 LOCK 3: Signature to detect New Route vs Update
+
     let lastRouteSignature = ""; 
+
+    // 💰 MONEY SAVER: Geometry Signature (Location + Exclusion)
+
     let lastGeometrySignature = ""; 
 
+
+
     let userLocationMarker = null;
+
     let radarCircle = null;
+
     let isBusTrackingActive = false;
 
+
+
+    // 🔥 CONFIG: 300 meters
+
     const APPROACH_RADIUS = 300; 
+
+
+
     const MY_MAP_ID = "48c2bb983bd19c1c44d95cb7";
+
     const BUS_ICON_URL = "https://raedapplebanon-spec.github.io/route-map/school-bus_6122028.png"; 
 
-    // Animation Vars
+
+
+    // =========================================================
+
+    // ✅ 1. NEW ANIMATION VARIABLES
+
+    // =========================================================
+
     let animationFrameId = null;
+
     let animationStartTime = 0;
-    const ANIMATION_DURATION = 1000; 
+
+    const ANIMATION_DURATION = 1000; // Slide takes 1 second (matches GPS update speed)
+
+
 
     function haversineDistance(lat1, lng1, lat2, lng2) {
+
       const R = 6371e3; 
+
       const toRad = x => x * Math.PI / 180;
+
       const dLat = toRad(lat2 - lat1);
+
       const dLng = toRad(lng2 - lng1);
+
       const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+
       return 2 * R * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
     }
+
+
 
     function groupCloseLocations(stops, tolerance = 15) {
+
       const clusters = [];
+
       stops.forEach(stop => {
+
         let placed = false;
+
         for (const c of clusters) {
+
           const d = haversineDistance(c.lat, c.lng, parseFloat(stop.lat), parseFloat(stop.lng));
+
           if (d < tolerance) {
+
             c.items.push(stop);
+
             if (stop.isStart) c.isStart = true;
+
             if (stop.isEnd) c.isEnd = true;
+
             if (stop.type === 'assistant') c.stopType = 'assistant';
+
             if (!stop.isExcluded) c.isExcluded = false;
+
             placed = true;
+
             break;
+
           }
+
         }
+
         if (!placed) {
+
           clusters.push({
+
             lat: parseFloat(stop.lat),
+
             lng: parseFloat(stop.lng),
+
             items: [stop],
+
             isStart: stop.isStart === true,
+
             isEnd: stop.isEnd === true,
+
             stopType: stop.type,
+
             isExcluded: stop.isExcluded === true
+
           });
+
         }
+
       });
+
       return clusters;
+
     }
+
+
 
     function updateRouteSummary(km, minutes) {
+
       const summaryBox = document.getElementById("route-summary");
+
       const summaryText = document.getElementById("summary-text");
+
       if (summaryBox && summaryText) {
+
         summaryBox.style.display = "block";
+
         summaryText.innerHTML = "المسافة: <b>" + km + " كم</b><br>الوقت: <b>" + minutes + " دقيقة</b>";
+
       }
+
     }
 
+
+
     window.initMap = async function() {
+
       try {
+
         const { Map } = await google.maps.importLibrary("maps");
+
         const { AdvancedMarkerElement, PinElement } = await google.maps.importLibrary("marker");
+
         const { Places } = await google.maps.importLibrary("places");
+
+
 
         infoWindow = new google.maps.InfoWindow();
 
+
+
         map = new Map(document.getElementById("map"), {
+
           center: { lat: 32.028031, lng: 35.704308 },
+
           zoom: 13,
+
           mapId: MY_MAP_ID,
+
           mapTypeControl: true,
+
           streetViewControl: false,
+
           fullscreenControl: false
+
         });
+
+
 
         const input = document.getElementById("pac-input");
+
         const legend = document.getElementById("legend");
+
         const summary = document.getElementById("route-summary");
 
+
+
         map.controls[google.maps.ControlPosition.TOP_LEFT].push(input);
+
         map.controls[google.maps.ControlPosition.RIGHT_BOTTOM].push(legend);
+
         map.controls[google.maps.ControlPosition.LEFT_BOTTOM].push(summary);
 
+
+
         const autocomplete = new google.maps.places.Autocomplete(input);
+
         autocomplete.bindTo("bounds", map);
 
+
+
         google.maps.event.addListenerOnce(map, 'tilesloaded', () => {
+
            input.style.display = "block";
+
            legend.style.display = "block";
+
         });
+
+
 
         autocomplete.addListener("place_changed", () => {
+
            const place = autocomplete.getPlace();
+
            const searchText = (place.name || input.value || "").toLowerCase();
+
            const foundMarker = window.routeMarkers.find(m => m.names.some(n => n.toLowerCase().includes(searchText)));
+
            if (foundMarker) {
+
                map.setCenter({ lat: foundMarker.lat, lng: foundMarker.lng });
+
                map.setZoom(19);
+
                infoWindow.setContent(foundMarker.html);
+
                infoWindow.open(map, foundMarker.marker);
+
                return;
+
            }
+
            if (place.geometry && place.geometry.location) {
+
                map.setCenter(place.geometry.location);
+
                map.setZoom(17);
+
            }
+
         });
+
+
 
         directionsService = new google.maps.DirectionsService();
+
         directionsRenderer = new google.maps.DirectionsRenderer({
+
             map: map,
+
             suppressMarkers: true,
+
             preserveViewport: true,
+
             polylineOptions: { strokeColor: "#1a73e8", strokeOpacity: 0.8, strokeWeight: 5 }
+
         });
 
+
+
         startLocationTracking();
+
         mapReady = true;
+
         
+
+        // Notify Flutter we are ready
+
         sendToFlutter({ action: 'mapIsReady' });
+
         console.log("✅ Assistant Map Initialized");
 
+
+
         if (window.pendingData) {
+
             window.setRouteData(window.pendingData.stops, window.pendingData.shift, window.pendingData.routeType);
+
             window.pendingData = null;
+
         }
+
       } catch (e) {
+
         console.error("❌ initMap Failed:", e);
+
       }
+
     };
+
+
 
     let locationWatchId = null;
 
+
+
     function startLocationTracking() {
+
         if (!navigator.geolocation) {
+
             console.log("❌ Geolocation not supported");
+
             return;
+
         }
+
         if (locationWatchId !== null) {
+
             navigator.geolocation.clearWatch(locationWatchId);
+
             locationWatchId = null;
+
         }
+
         const options = { enableHighAccuracy: true, maximumAge: 0, timeout: 10000 };
 
+
+
+        // Listen to Browser GPS (for testing/backup)
+
         locationWatchId = navigator.geolocation.watchPosition((pos) => {
+
              processLocationUpdate(pos.coords.latitude, pos.coords.longitude);
+
         }, (err) => {
+
             console.warn(`⚠️ GPS Error (${err.code}): ${err.message}`);
+
         }, options);
+
     }
+
+
+
+    // =========================================================
+
+    // ✅ 2. THE NEW "SMOOTH" UPDATE FUNCTION
+
+    // =========================================================
 
     function processLocationUpdate(lat, lng) {
+
          if (!lat || !lng) return;
 
+
+
          const newLoc = { lat: lat, lng: lng };
+
          const newLocObj = new google.maps.LatLng(lat, lng);
 
+
+
+         // A. First Time Setup (Instant Create)
+
          if (!userLocationMarker) {
+
              userLocationMarker = new google.maps.Marker({
+
                  map: map,
+
                  position: newLoc, 
+
                  icon: { url: BUS_ICON_URL, scaledSize: new google.maps.Size(40, 40), anchor: new google.maps.Point(20, 20) },
+
                  title: "حافلة المدرسة",
+
                  zIndex: 999
+
              });
+
              
+
              radarCircle = new google.maps.Circle({
+
                  strokeColor: "#1a73e8", strokeOpacity: 0.8, strokeWeight: 2,
+
                  fillColor: "#1a73e8", fillOpacity: 0.15,
+
                  map: map, center: newLoc, radius: APPROACH_RADIUS 
+
              });
+
              
+
              map.setZoom(15); 
+
              isBusTrackingActive = true; 
+
              return;
+
          } 
 
+
+
+         // B. The Magic: Start Sliding 🚌💨
+
+         // Cancel any slide currently running so we don't fight
+
          if (animationFrameId) cancelAnimationFrame(animationFrameId);
+
          
+
+         // Slide from CURRENT visible position to NEW target
+
          const startPos = userLocationMarker.getPosition(); 
+
          animateMarker(startPos, newLocObj);
 
+
+
+         // Update Radar (Instant is fine for radar)
+
          if (radarCircle) radarCircle.setCenter(newLoc);
+
          if (isBusTrackingActive) map.panTo(newLoc); 
 
+
+
+         // C. Check Stops & Alerts (Moved to separate function to keep code clean)
+
          checkArrivalLogic(newLocObj); 
+
     }
+
+
+
+    // =========================================================
+
+    // ✅ 3. THE ANIMATION HELPER (60 FPS Slider)
+
+    // =========================================================
 
     function animateMarker(startLatLng, targetLatLng) {
+
         animationStartTime = Date.now();
+
         
+
         function step() {
+
             const elapsed = Date.now() - animationStartTime;
-            const progress = Math.min(elapsed / ANIMATION_DURATION, 1);
+
+            const progress = Math.min(elapsed / ANIMATION_DURATION, 1); // 0.0 to 1.0
+
+
+
+            // Calculate the point between start and end
 
             const currentLat = startLatLng.lat() + (targetLatLng.lat() - startLatLng.lat()) * progress;
+
             const currentLng = startLatLng.lng() + (targetLatLng.lng() - startLatLng.lng()) * progress;
+
             const currentPos = new google.maps.LatLng(currentLat, currentLng);
 
-            userLocationMarker.setPosition(currentPos);
+
+
+            userLocationMarker.setPosition(currentPos); // Move tiny amount
+
+
 
             if (progress < 1) {
-                animationFrameId = requestAnimationFrame(step);
+
+                animationFrameId = requestAnimationFrame(step); // Keep going until finished
+
             }
+
         }
+
         step();
+
     }
 
-    // --- LOGIC HANDLER (FIXED) ---
+
+
+    // =========================================================
+
+    // ✅ 4. LOGIC HANDLER (Separated for cleanliness)
+
+    // =========================================================
+
     function checkArrivalLogic(myLocObj) {
+
          if (window.orderedStopIds && window.orderedStopIds.length > 0) {
+
              let firstPendingIndex = -1;
+
              for (let i = 0; i < window.orderedStopIds.length; i++) {
+
                  const id = window.orderedStopIds[i];
+
                  const markerObj = window.routeMarkers.find(m => m.items.some(item => item.id === id));
+
                  
+
                  if (markerObj) {
+
                      const isPending = markerObj.items.some(s => 
+
                          (s.type === 'student' || s.type === 'employee') && 
+
                          s.status === 'pending' && 
+
                          !s.isExcluded &&
-                         !window.alertedStudentIds.has(s.id) // ✅ CHECK LOCK
+
+                         !window.alertedStudentIds.has(s.id) 
+
                      );
+
                      if (isPending) { firstPendingIndex = i; break; }
+
                  }
+
              }
+
+
 
              if (firstPendingIndex !== -1) {
+
                  let batchIds = [];
+
                  let batchNames = [];
+
                  
+
                  for (let k = 0; k < 5; k++) {
+
                      const targetIndex = firstPendingIndex + k;
+
                      if (targetIndex >= window.orderedStopIds.length) break;
 
+
+
                      const targetId = window.orderedStopIds[targetIndex];
+
                      const targetMarker = window.routeMarkers.find(m => m.items.some(item => item.id === targetId));
+
                      
+
                      if (targetMarker) {
+
                          const stopLoc = new google.maps.LatLng(targetMarker.lat, targetMarker.lng);
+
                          const distToStop = google.maps.geometry.spherical.computeDistanceBetween(myLocObj, stopLoc);
+
                          
+
                          if (distToStop < APPROACH_RADIUS) {
+
                              const activeItems = targetMarker.items.filter(s => 
+
                                  (s.type === 'student' || s.type === 'employee') && 
+
                                  s.status === 'pending' && 
+
                                  !s.isExcluded &&
-                                 !window.alertedStudentIds.has(s.id) // ✅ DOUBLE CHECK LOCK
+
+                                 !window.alertedStudentIds.has(s.id)
+
                              );
+
                              
+
                              if (activeItems.length > 0) {
-                                 activeItems.forEach(s => window.alertedStudentIds.add(s.id)); // 🔒 LOCK
+
+                                 activeItems.forEach(s => window.alertedStudentIds.add(s.id)); 
+
                                  batchIds.push(...activeItems.map(i => i.id));
+
                                  const namesAtThisStop = activeItems.map(s => s.name).join(" & ");
+
                                  batchNames.push(namesAtThisStop);
+
                                  console.log("➕ Adding to batch: " + namesAtThisStop);
+
                              }
+
                          } else {
+
                              break; 
+
                          }
+
                      }
+
                  }
+
+
 
                  if (batchIds.length > 0) {
+
                      const finalNameString = batchNames.join(" + ");
+
                      console.log("📤 Sending Sequential Batch: " + finalNameString);
+
                      sendToFlutter({ action: 'stopApproaching', stopIds: batchIds, stopName: finalNameString });
+
                  }
+
              }
+
          }
 
-         // Arrival Logic (Standard)
+
+
          if (currentRouteType === 'midday' && !hasLeftStartZone && startStopLocation) {
+
              const startLocObj = new google.maps.LatLng(startStopLocation.lat, startStopLocation.lng);
+
              const distFromStart = google.maps.geometry.spherical.computeDistanceBetween(myLocObj, startLocObj);
+
+             
+
              if (distFromStart > 500) { 
+
                  hasLeftStartZone = true;
-                 console.log("🔓 Bus left start zone.");
+
+                 console.log("🔓 Bus has left the school zone. Arrival detection armed.");
+
              }
+
          }
+
+
 
          if (!hasTriggeredArrival) { 
+
              let targetLoc = null;
+
              let triggerRadius = 50; 
+
              let canTrigger = true;
 
+
+
              if (currentRouteType === 'first_morning') {
+
                  if (endStopLocation) { targetLoc = endStopLocation; triggerRadius = 300; }
+
              }
+
              else if (currentRouteType === 'midday') {
+
                  if (endStopLocation) {
+
                      targetLoc = endStopLocation; 
+
                      triggerRadius = 300;
+
                      if (!hasLeftStartZone) canTrigger = false; 
+
                  }
+
              }
+
              else if (currentRouteType === 'last_evening') {
+
                  if (pmLastStudentLocation) { targetLoc = pmLastStudentLocation; triggerRadius = 100; } 
+
                  else if (endStopLocation) { targetLoc = endStopLocation; triggerRadius = 100; }
+
              }
+
              else {
+
                  if (currentShift === 'AM' && endStopLocation) { targetLoc = endStopLocation; triggerRadius = 300; }
+
                  else if (endStopLocation) { targetLoc = endStopLocation; triggerRadius = 100; }
+
              }
+
+
 
              if (targetLoc && canTrigger) {
+
                  const t = new google.maps.LatLng(targetLoc.lat, targetLoc.lng);
+
                  const dist = google.maps.geometry.spherical.computeDistanceBetween(myLocObj, t);
+
                  
+
                  if (dist < triggerRadius) {
+
                      hasTriggeredArrival = true; 
+
                      console.log("🏁 Arrival Triggered!");
+
                      sendToFlutter({ action: 'arrivedAtEnd' });
+
                  }
+
              }
+
          }
+
     }
+
+
+
+    // ✅ FIXED LISTENER: Now catches "updateDriverLocation"
 
     window.addEventListener("message", function (event) {
+
       if (!event.data) return;
+
       let data = event.data;
+
       if (typeof data === 'string') { try { data = JSON.parse(data); } catch(e){} }
+
       
+
+      // Case 1: Set Route
+
       if (data.action === "setDriverRoute") {
+
           const stops = data.stops || [];
+
           const shift = data.shift || "AM"; 
+
           const routeType = data.routeType || "first_morning"; 
+
           if (mapReady) window.setRouteData(stops, shift, routeType);
+
           else window.pendingData = { stops: stops, shift: shift, routeType: routeType };
+
       }
+
       
+
+      // Case 2: Update Location (From Flutter)
+
       if (data.action === "updateDriverLocation") {
+
+          console.log("📍 JS: Moving Bus to " + data.lat + ", " + data.lng);
+
           processLocationUpdate(parseFloat(data.lat), parseFloat(data.lng));
+
       }
+
     });
 
+
+
     window.setRouteData = function(stops, shift, routeType) {
-      // 🔒 THE CRITICAL FIX IS HERE
-      // We removed the "ID" from the signature.
-      // Now, locks ONLY reset if you change the SHIFT or ROUTE TYPE.
-      // Simply refreshing data will NOT clear the memory.
-      const newSignature = shift + "_" + routeType; 
-      
+
+      // 🔒 LOCK RESET LOGIC
+
+      const newSignature = shift + "_" + routeType + "_" + (stops.length > 0 ? stops[0].id : "");
+
       if (newSignature !== lastRouteSignature) {
-          console.log("🔄 Totally New Shift Detected. Resetting Locks.");
+
+          console.log("🔄 New Route Detected. Resetting Locks.");
+
           window.alertedStudentIds.clear();
+
           hasTriggeredArrival = false; 
+
           hasLeftStartZone = false;
+
           lastRouteSignature = newSignature;
+
       }
+
+
 
       currentShift = shift; 
+
       currentRouteType = routeType; 
 
+
+
+      // 💰 MONEY SAVER LOGIC 💰
+
       const currentGeometrySignature = stops.map(s => `${s.id}_${s.lat}_${s.lng}_${s.isExcluded}`).join("|");
+
       const isStructureChanged = currentGeometrySignature !== lastGeometrySignature;
+
       lastGeometrySignature = currentGeometrySignature;
 
+
+
+      // 1. CLEAR OLD MARKERS (Visuals only)
+
       window.routeMarkers.forEach(obj => obj.marker.map = null);
+
       window.routeMarkers = [];
 
+
+
+      // Only clear the blue line if the route path actually changed!
+
       if (isStructureChanged) {
+
         directionsRenderer.setDirections({ routes: [] });
+
         document.getElementById("route-summary").style.display = "none";
+
       }
+
+
 
       const bounds = new google.maps.LatLngBounds();
+
       const clusters = groupCloseLocations(stops, 15);
+
       
+
       startStopLocation = null;
+
       endStopLocation = null;
+
       pmLastStudentLocation = null;
 
+
+
       const addMarker = (cluster, color, text, html) => {
-          const pin = new google.maps.marker.PinElement({ background: color, borderColor: "#FFFFFF", glyphColor: "#FFFFFF", glyphText: text });
-          const marker = new google.maps.marker.AdvancedMarkerElement({ map: map, position: { lat: cluster.lat, lng: cluster.lng }, content: pin.element });
-          marker.addListener("click", () => { infoWindow.setContent(html); infoWindow.open(map, marker); });
-          
-          const isAlreadyTriggered = cluster.items.some(s => window.alertedStudentIds.has(s.id));
-          
-          window.routeMarkers.push({
-              marker, pin, names: cluster.items.map(i => i.name || ""), html, lat: cluster.lat, lng: cluster.lng,
-              isStart: cluster.isStart, isEnd: cluster.isEnd, items: cluster.items, hasTriggeredApproach: isAlreadyTriggered 
-          });
+
+         const pin = new google.maps.marker.PinElement({ background: color, borderColor: "#FFFFFF", glyphColor: "#FFFFFF", glyphText: text });
+
+         const marker = new google.maps.marker.AdvancedMarkerElement({ map: map, position: { lat: cluster.lat, lng: cluster.lng }, content: pin.element });
+
+         marker.addListener("click", () => { infoWindow.setContent(html); infoWindow.open(map, marker); });
+
+         
+
+         const isAlreadyTriggered = cluster.items.some(s => window.alertedStudentIds.has(s.id));
+
+         
+
+         window.routeMarkers.push({
+
+             marker, pin, names: cluster.items.map(i => i.name || ""), html, lat: cluster.lat, lng: cluster.lng,
+
+             isStart: cluster.isStart, isEnd: cluster.isEnd, items: cluster.items, hasTriggeredApproach: isAlreadyTriggered 
+
+         });
+
       };
 
-      // ... (Rest of rendering logic remains unchanged for brevity, but it's included in the file)
-      // This part draws the pins and calls calculateRoadRoute like before.
+
+
       let validStopCounter = 0; 
 
+
+
+      // 2. RE-DRAW MARKERS (Colors update automatically here)
+
       clusters.forEach((cluster) => {
+
           const pos = { lat: cluster.lat, lng: cluster.lng };
+
           bounds.extend(pos);
+
           
+
           if (cluster.isStart) startStopLocation = pos;
+
           if (cluster.isEnd) endStopLocation = pos;
 
+
+
           let color = "#1a73e8"; 
+
           let text = ""; 
+
           let header = "نقطة تجمع";
 
+
+
           if (cluster.isExcluded) { 
+
               color = "#757575"; text = "X"; 
+
           }
+
           else if (cluster.isStart) { 
+
               color = "#00c853"; text = "S"; header = "نقطة البداية"; 
+
           }
+
           else if (cluster.isEnd) { 
+
               color = "#d50000"; text = "E"; header = "نقطة النهاية"; 
+
           }
+
           else if (cluster.stopType === 'assistant') { 
+
               color = "#9C27B0"; text = "A"; header = "المرافق"; 
+
           }
+
           else {
+
+              // Students OR Employees
+
               validStopCounter++; 
+
               text = validStopCounter.toString();
+
               const activeItems = cluster.items.filter(s => (s.type === 'student' || s.type === 'employee') && !s.isExcluded);
+
               const anyPending = activeItems.some(s => s.status === 'pending');
+
               if (activeItems.length > 0 && anyPending) color = "#d32f2f"; else color = "#388e3c"; 
+
           }
+
+
 
           let rows = cluster.items.map(s => {
+
               if (s.type === 'assistant') return `<div style="margin-bottom:6px; border-bottom:1px solid #eee; padding-bottom:4px;"><b>${s.name || 'مرافق'}</b></div>`;
+
               
+
               let badgeColor = 'bg-red'; let statusTxt = (currentShift === 'PM') ? 'لم يتم التنزيل' : 'لم يتم التحميل'; 
+
               if (s.status === 'picked') { badgeColor = 'bg-green'; statusTxt = 'تم التحميل'; }
+
               else if (s.status === 'dropped') { badgeColor = 'bg-green'; statusTxt = 'تم التنزيل'; }
+
               else if (s.isExcluded) { badgeColor = 'bg-gray'; statusTxt = 'مستبعد'; }
+
               
+
               let details = s.grade || '';
+
               if (s.type === 'employee') details = 'موظف';
 
+
+
               return `<div style="margin-bottom:6px; border-bottom:1px solid #eee; padding-bottom:4px;"><span class="status-badge ${badgeColor}">${statusTxt}</span><b>${s.name || 'طالب'}</b><br><span style="font-size:12px; color:#555;">${details}</span></div>`;
+
           }).join('');
+
           
+
           let html = `<div style="color:black;text-align:right;direction:rtl;min-width:180px;"><b style="color:${color}; font-size:14px;">${header}</b><hr>${rows}</div>`;
+
           addMarker(cluster, color, text, html);
+
       });
 
+
+
+      // 3. DECIDE: API vs FREE
+
       if (clusters.length >= 2) {
+
           if (isStructureChanged) {
+
+              // 🔥 OFFLINE PROTECTION 🔥
+
               if (navigator.onLine === false) {
+
                     console.log("⚠️ Offline detected. Skipping API. Using Linear Order.");
+
                     calculateFallbackRoute(clusters);
+
               } else {
+
                     console.log("🔄 Route structure changed. Calling API ($)...");
+
                     calculateRoadRoute(clusters); 
+
               }
+
           } else {
+
               console.log("💰 Status update only. Skipping API call (Free). Restoring numbers.");
+
               restoreMarkerVisuals(); 
+
           }
+
       }
+
       
+
       if (!isBusTrackingActive && !bounds.isEmpty()) map.fitBounds(bounds);
+
     };
 
+
+
+    // 💰 MONEY SAVER HELPER: Restores numbers without asking Google
+
     function restoreMarkerVisuals() {
+
         if (!window.orderedStopIds || window.orderedStopIds.length === 0) return;
+
         
+
         let visualCounter = 1;
+
         let processedClusters = new Set();
 
+
+
         window.orderedStopIds.forEach(id => {
+
               const markerObj = window.routeMarkers.find(m => m.items.some(item => item.id === id));
+
               if (!markerObj) return;
+
               if (processedClusters.has(markerObj)) return; 
+
               
+
               const isStart = markerObj.isStart;
+
               const isEnd = markerObj.isEnd;
+
               
+
               if (!isStart && !isEnd) {
+
                   const activeItems = markerObj.items.filter(s => (s.type === 'student' || s.type === 'employee') && !s.isExcluded);
+
                   if (activeItems.length > 0) {
+
                       markerObj.pin.glyphText = visualCounter.toString();
+
                       markerObj.marker.content = markerObj.pin.element; 
+
                       visualCounter++;
+
                       processedClusters.add(markerObj);
+
                   }
+
               }
+
         });
+
     }
+
+
+
+    // 🛡️ OFFLINE FALLBACK ROUTER
 
     function calculateFallbackRoute(clusters) {
+
        let orderedIds = [];
+
+       // Simple Order: Start -> Others -> End
+
        const startPoint = clusters.find(c => c.isStart);
+
        const endPoint = clusters.find(c => c.isEnd);
+
        const others = clusters.filter(c => c !== startPoint && c !== endPoint);
 
+
+
        if (startPoint) startPoint.items.forEach(i => orderedIds.push(i.id));
+
        others.forEach(c => c.items.forEach(i => orderedIds.push(i.id)));
+
        if (endPoint) endPoint.items.forEach(i => orderedIds.push(i.id));
 
+
+
+       // Update Visuals
+
        window.orderedStopIds = orderedIds; 
+
        restoreMarkerVisuals(); 
+
        
+
+       // Alert the user that optimization failed but order is preserved
+
+       console.log("⚠️ Fallback Route Order Applied (Linear)");
+
        sendToFlutter({ action: 'routeOrdered', orderedIds: orderedIds });
+
     }
+
+
 
     function calculateRoadRoute(clusters) {
+
        const startPoint = clusters.find(c => c.isStart);
+
        const endPoint = clusters.find(c => c.isEnd);
+
        if (!startPoint || !endPoint) return;
+
        const activeClusters = clusters.filter(c => !c.isExcluded);
+
        const assistants = activeClusters.filter(c => c.stopType === 'assistant');
+
        const studentsAndEmployees = activeClusters.filter(c => c !== startPoint && c !== endPoint && c.stopType !== 'assistant');
+
        
+
        let waypoints = [];
+
        assistants.forEach(a => waypoints.push({ location: {lat: a.lat, lng: a.lng}, stopover: true }));
+
        studentsAndEmployees.forEach(s => waypoints.push({ location: {lat: s.lat, lng: s.lng}, stopover: true }));
 
+
+
        directionsService.route({
+
            origin: { lat: startPoint.lat, lng: startPoint.lng },
+
            destination: { lat: endPoint.lat, lng: endPoint.lng },
+
            waypoints: waypoints, travelMode: google.maps.TravelMode.DRIVING, optimizeWaypoints: true,
+
        }, (result, status) => {
+
            if (status === "OK") {
+
                directionsRenderer.setDirections(result);
+
                const orderIndices = result.routes[0].waypoint_order;
+
                let orderedIds = [];
+
                let visualCounter = 1;
 
+
+
                orderedIds.push(startPoint.items[0].id);
+
                orderIndices.forEach(idx => {
+
                    const cluster = [...assistants, ...studentsAndEmployees][idx];
+
                    cluster.items.forEach(item => orderedIds.push(item.id));
+
                    
+
                    const markerObj = window.routeMarkers.find(m => 
+
                        Math.abs(m.lat - cluster.lat) < 0.00001 && 
+
                        Math.abs(m.lng - cluster.lng) < 0.00001
+
                    );
+
                    if (markerObj && markerObj.pin) {
+
                        const activeItems = cluster.items.filter(s => (s.type === 'student' || s.type === 'employee') && !s.isExcluded);
+
                        if (activeItems.length > 0) {
+
                            markerObj.pin.glyphText = visualCounter.toString();
+
                            visualCounter++;
+
                        }
+
                    }
+
                });
+
                orderedIds.push(endPoint.items[0].id);
 
+
+
                if (currentShift === 'PM' && orderIndices.length > 0) {
+
                    const lastIndex = orderIndices[orderIndices.length - 1];
+
                    const lastCluster = [...assistants, ...studentsAndEmployees][lastIndex];
+
                    if (lastCluster) pmLastStudentLocation = { lat: lastCluster.lat, lng: lastCluster.lng };
+
                }
+
                let dist = 0, dur = 0;
+
                result.routes[0].legs.forEach(l => { dist += l.distance.value; dur += l.duration.value; });
+
                updateRouteSummary((dist/1000).toFixed(1), Math.round(dur/60));
+
                window.orderedStopIds = orderedIds; 
+
                sendToFlutter({ action: 'routeOrdered', orderedIds: orderedIds });
+
            } else {
+
+               // 🔥 API FAILED (e.g. Offline mid-request) -> FALLBACK
+
                console.warn("❌ Routing API Failed (" + status + "). Reverting to Fallback.");
+
                calculateFallbackRoute(clusters);
+
            }
+
        });
+
     }
 
+
+
     function sendToFlutter(payload) {
+
         if (window.FlutterChan) window.FlutterChan.postMessage(JSON.stringify(payload));
+
         else window.parent.postMessage(payload, "*");
+
     }
+
   </script>
+
 </body>
+
 </html>
