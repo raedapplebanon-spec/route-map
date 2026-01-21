@@ -15,7 +15,6 @@
     #map { height: 100%; width: 100%; }
   </style>
 
-  <!-- Google Maps (same as before, but we won't use Directions/ETA anymore) -->
   <script
     src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCYaJ4Gjq36mq8swYgjNXOYr5mKZi45niA&callback=initMap&libraries=marker,geometry&loading=async&v=weekly"
     async defer>
@@ -36,8 +35,12 @@
     let childMarkers = [];
     let myStopsData = [];
 
-    // Fit logic
-    let didInitialFit = false;
+    // ✅ FIX: Fit separately for students first, then once again when bus first appears
+    let didFitStudents = false;
+    let didFitBus = false;
+
+    // ✅ FIX: if bus updates arrive before map is ready
+    let pendingBus = null;
 
     // Animation
     let animationFrameId = null;
@@ -58,7 +61,12 @@
         fullscreenControl: false,
       });
 
-      // Tell Flutter (or parent frame) that map is ready
+      // If a bus location came early, apply it now
+      if (pendingBus) {
+        updateBusPosition(pendingBus.lat, pendingBus.lng);
+        pendingBus = null;
+      }
+
       sendToFlutter({ action: 'mapIsReady' });
     };
 
@@ -76,7 +84,7 @@
         myStopsData = myMarkers;
 
         drawMyChildren(myMarkers);
-        fitToMarkersAndBus(); // initial fit (once)
+        fitToStudentsOnce(); // ✅ fit to student markers
       }
 
       if (data.action === "updateBusLocation") {
@@ -86,7 +94,6 @@
 
     // --- Draw Green Pins (multiple students) ---
     async function drawMyChildren(markersData) {
-      // Clear old markers
       childMarkers.forEach(m => { m.map = null; });
       childMarkers = [];
 
@@ -117,13 +124,19 @@
 
     // --- Bus Animation / Updates ---
     function updateBusPosition(lat, lng) {
+      // If map not ready yet, store last bus update
+      if (!map || !window.google || !google.maps) {
+        pendingBus = { lat, lng };
+        return;
+      }
+
       const nLat = parseFloat(lat);
       const nLng = parseFloat(lng);
       if (!isFinite(nLat) || !isFinite(nLng)) return;
 
       const newPos = new google.maps.LatLng(nLat, nLng);
 
-      // First time: create marker and fit map (once)
+      // First time: create marker, then fit once to include bus + students
       if (!busMarker) {
         busMarker = new google.maps.Marker({
           map: map,
@@ -136,11 +149,10 @@
           zIndex: 1000
         });
 
-        fitToMarkersAndBus(); // if markers already exist, include bus too
+        fitToStudentsAndBusOnce(); // ✅ ensure bus becomes visible
         return;
       }
 
-      // Animate from current to new position
       if (animationFrameId) cancelAnimationFrame(animationFrameId);
       const startPos = busMarker.getPosition();
       animateMarker(startPos, newPos);
@@ -165,14 +177,13 @@
       step();
     }
 
-    // --- Fit map once to show bus + all student markers ---
-    function fitToMarkersAndBus() {
-      if (didInitialFit || !map) return;
+    // --- Fit map to students once (so markers show immediately) ---
+    function fitToStudentsOnce() {
+      if (didFitStudents || !map) return;
 
       const bounds = new google.maps.LatLngBounds();
       let hasAny = false;
 
-      // Add student markers
       (myStopsData || []).forEach(m => {
         const lat = parseFloat(m.lat);
         const lng = parseFloat(m.lng);
@@ -182,15 +193,34 @@
         }
       });
 
-      // Add bus marker if exists
-      if (busMarker) {
-        bounds.extend(busMarker.getPosition());
-        hasAny = true;
+      if (hasAny) {
+        map.fitBounds(bounds, 60);
+        didFitStudents = true;
       }
+    }
+
+    // --- Fit map once more when bus appears, include bus + students ---
+    function fitToStudentsAndBusOnce() {
+      if (didFitBus || !map || !busMarker) return;
+
+      const bounds = new google.maps.LatLngBounds();
+      let hasAny = false;
+
+      (myStopsData || []).forEach(m => {
+        const lat = parseFloat(m.lat);
+        const lng = parseFloat(m.lng);
+        if (isFinite(lat) && isFinite(lng)) {
+          bounds.extend(new google.maps.LatLng(lat, lng));
+          hasAny = true;
+        }
+      });
+
+      bounds.extend(busMarker.getPosition());
+      hasAny = true;
 
       if (hasAny) {
-        map.fitBounds(bounds, 60); // padding
-        didInitialFit = true;
+        map.fitBounds(bounds, 60);
+        didFitBus = true;
       }
     }
 
