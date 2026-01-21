@@ -5,13 +5,7 @@
   <title>Parent Map</title>
 
   <style>
-    html, body {
-      height: 100%;
-      margin: 0;
-      padding: 0;
-      overflow: hidden;
-      font-family: 'Segoe UI', Tahoma, sans-serif;
-    }
+    html, body { height: 100%; margin: 0; padding: 0; overflow: hidden; font-family: 'Segoe UI', Tahoma, sans-serif; }
     #map { height: 100%; width: 100%; }
   </style>
 
@@ -25,21 +19,19 @@
   <div id="map"></div>
 
   <script>
-    // --- Configuration ---
     const BUS_ICON_URL = "https://raedapplebanon-spec.github.io/route-map/school-bus_6122028.png";
     const CHILD_ICON_COLOR = "#00c853";
 
-    // --- State ---
+    // ✅ Camera behavior
+    const BUS_FOCUS_ZOOM = 16;
+    const FOLLOW_BUS = true;
+
     let map;
     let busMarker = null;
     let childMarkers = [];
     let myStopsData = [];
 
-    // ✅ FIX: Fit separately for students first, then once again when bus first appears
-    let didFitStudents = false;
-    let didFitBus = false;
-
-    // ✅ FIX: if bus updates arrive before map is ready
+    // If bus updates arrive before map is ready
     let pendingBus = null;
 
     // Animation
@@ -47,7 +39,6 @@
     let animationStartTime = 0;
     const ANIMATION_DURATION = 1000;
 
-    // --- Initialize Map ---
     window.initMap = async function() {
       const { Map } = await google.maps.importLibrary("maps");
       await google.maps.importLibrary("marker");
@@ -61,7 +52,7 @@
         fullscreenControl: false,
       });
 
-      // If a bus location came early, apply it now
+      // Apply any early bus update
       if (pendingBus) {
         updateBusPosition(pendingBus.lat, pendingBus.lng);
         pendingBus = null;
@@ -70,7 +61,6 @@
       sendToFlutter({ action: 'mapIsReady' });
     };
 
-    // --- Message Listener ---
     window.addEventListener("message", function(event) {
       if (!event.data) return;
 
@@ -82,17 +72,15 @@
       if (data.action === "initParentMap") {
         const myMarkers = data.myMarkers || [];
         myStopsData = myMarkers;
-
-        drawMyChildren(myMarkers);
-        fitToStudentsOnce(); // ✅ fit to student markers
+        drawMyChildren(myMarkers); // ✅ only draw student markers (no fit)
       }
 
       if (data.action === "updateBusLocation") {
+        // console.log("🚌 bus update:", data.lat, data.lng); // optional debug
         updateBusPosition(data.lat, data.lng);
       }
     });
 
-    // --- Draw Green Pins (multiple students) ---
     async function drawMyChildren(markersData) {
       childMarkers.forEach(m => { m.map = null; });
       childMarkers = [];
@@ -122,9 +110,7 @@
       });
     }
 
-    // --- Bus Animation / Updates ---
     function updateBusPosition(lat, lng) {
-      // If map not ready yet, store last bus update
       if (!map || !window.google || !google.maps) {
         pendingBus = { lat, lng };
         return;
@@ -136,7 +122,6 @@
 
       const newPos = new google.maps.LatLng(nLat, nLng);
 
-      // First time: create marker, then fit once to include bus + students
       if (!busMarker) {
         busMarker = new google.maps.Marker({
           map: map,
@@ -149,9 +134,14 @@
           zIndex: 1000
         });
 
-        fitToStudentsAndBusOnce(); // ✅ ensure bus becomes visible
+        // ✅ Focus on bus first time
+        map.setCenter(newPos);
+        map.setZoom(BUS_FOCUS_ZOOM);
         return;
       }
+
+      // ✅ Follow bus on every update (optional)
+      if (FOLLOW_BUS) map.panTo(newPos);
 
       if (animationFrameId) cancelAnimationFrame(animationFrameId);
       const startPos = busMarker.getPosition();
@@ -170,67 +160,14 @@
 
         busMarker.setPosition(new google.maps.LatLng(currentLat, currentLng));
 
-        if (progress < 1) {
-          animationFrameId = requestAnimationFrame(step);
-        }
+        if (progress < 1) animationFrameId = requestAnimationFrame(step);
       }
       step();
     }
 
-    // --- Fit map to students once (so markers show immediately) ---
-    function fitToStudentsOnce() {
-      if (didFitStudents || !map) return;
-
-      const bounds = new google.maps.LatLngBounds();
-      let hasAny = false;
-
-      (myStopsData || []).forEach(m => {
-        const lat = parseFloat(m.lat);
-        const lng = parseFloat(m.lng);
-        if (isFinite(lat) && isFinite(lng)) {
-          bounds.extend(new google.maps.LatLng(lat, lng));
-          hasAny = true;
-        }
-      });
-
-      if (hasAny) {
-        map.fitBounds(bounds, 60);
-        didFitStudents = true;
-      }
-    }
-
-    // --- Fit map once more when bus appears, include bus + students ---
-    function fitToStudentsAndBusOnce() {
-      if (didFitBus || !map || !busMarker) return;
-
-      const bounds = new google.maps.LatLngBounds();
-      let hasAny = false;
-
-      (myStopsData || []).forEach(m => {
-        const lat = parseFloat(m.lat);
-        const lng = parseFloat(m.lng);
-        if (isFinite(lat) && isFinite(lng)) {
-          bounds.extend(new google.maps.LatLng(lat, lng));
-          hasAny = true;
-        }
-      });
-
-      bounds.extend(busMarker.getPosition());
-      hasAny = true;
-
-      if (hasAny) {
-        map.fitBounds(bounds, 60);
-        didFitBus = true;
-      }
-    }
-
-    // --- Send to Flutter (web + mobile webview) ---
     function sendToFlutter(payload) {
-      if (window.FlutterChan) {
-        window.FlutterChan.postMessage(JSON.stringify(payload));
-      } else {
-        window.parent.postMessage(payload, "*");
-      }
+      if (window.FlutterChan) window.FlutterChan.postMessage(JSON.stringify(payload));
+      else window.parent.postMessage(payload, "*");
     }
   </script>
 </body>
