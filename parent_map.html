@@ -111,6 +111,7 @@
       if (data.action === "updateBusLocation") {
         const busPos = { lat: parseFloat(data.lat), lng: parseFloat(data.lng) };
 
+        // 1. Create or Move the Bus Marker
         if (!busMarker) {
           const busImg = document.createElement("img");
           busImg.src = BUS_ICON_URL;
@@ -118,13 +119,30 @@
           busMarker = new AdvancedMarkerElement({
             map: map,
             position: busPos,
-            content: busImg
+            content: busImg,
+            zIndex: 1000 // Ensure bus is above student pins
           });
         } else {
           busMarker.position = busPos;
         }
 
-        // Calculate ETA to nearest student marker
+        // 2. 🔥 AUTO-ZOOM: Ensure both Bus and Student are visible
+        const bounds = new google.maps.LatLngBounds();
+        bounds.extend(busPos); // Add Bus to view
+        
+        // Add all student pins to the view
+        Object.values(studentMarkers).forEach(m => {
+          bounds.extend(m.position);
+        });
+
+        // Only fit bounds if we have students and a bus
+        if (Object.keys(studentMarkers).length > 0) {
+          map.fitBounds(bounds, {
+            padding: { top: 100, bottom: 50, left: 50, right: 50 } // Add space so markers aren't touching edges
+          });
+        }
+
+        // 3. Calculate ETA
         const firstId = Object.keys(studentMarkers)[0];
         if (firstId) {
           const sPos = studentMarkers[firstId].position;
