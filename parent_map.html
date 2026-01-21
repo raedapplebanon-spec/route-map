@@ -3,266 +3,204 @@
 <head>
   <meta charset="UTF-8" />
   <title>Parent Map</title>
-  
+
   <style>
-    html, body { height: 100%; margin: 0; padding: 0; overflow: hidden; font-family: 'Segoe UI', Tahoma, sans-serif; }
-    #map { height: 100%; width: 100%; }
-    
-    .eta-badge {
-      position: absolute;
-      top: 10px;
-      left: 10px;
-      background: white;
-      padding: 8px 12px;
-      border-radius: 20px;
-      box-shadow: 0 2px 6px rgba(0,0,0,0.3);
-      font-size: 14px;
-      font-weight: bold;
-      color: #1a73e8;
-      display: none; 
-      z-index: 999;
+    html, body {
+      height: 100%;
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+      font-family: 'Segoe UI', Tahoma, sans-serif;
     }
+    #map { height: 100%; width: 100%; }
   </style>
 
-  <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCYaJ4Gjq36mq8swYgjNXOYr5mKZi45niA&callback=initMap&libraries=marker,places,geometry&loading=async&v=weekly" async defer></script>
+  <!-- Google Maps (same as before, but we won't use Directions/ETA anymore) -->
+  <script
+    src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCYaJ4Gjq36mq8swYgjNXOYr5mKZi45niA&callback=initMap&libraries=marker,geometry&loading=async&v=weekly"
+    async defer>
+  </script>
 </head>
 
 <body>
-  <div id="eta-badge" class="eta-badge">🕑 جاري الحساب...</div>
   <div id="map"></div>
 
   <script>
     // --- Configuration ---
     const BUS_ICON_URL = "https://raedapplebanon-spec.github.io/route-map/school-bus_6122028.png";
-    const CHILD_ICON_COLOR = "#00c853"; 
+    const CHILD_ICON_COLOR = "#00c853";
 
     // --- State ---
     let map;
-    let directionsService, directionsRenderer;
     let busMarker = null;
-    let childMarkers = []; 
-    let myStopsData = []; 
-    
-    // Animation Globals
+    let childMarkers = [];
+    let myStopsData = [];
+
+    // Fit logic
+    let didInitialFit = false;
+
+    // Animation
     let animationFrameId = null;
     let animationStartTime = 0;
-    const ANIMATION_DURATION = 1000; 
-
-    // --- PHASE 1: LOGIC (The Clustering) ---
-    function haversineDistance(lat1, lng1, lat2, lng2) {
-      const R = 6371e3; 
-      const toRad = x => x * Math.PI / 180;
-      const dLat = toRad(lat2 - lat1);
-      const dLng = toRad(lng2 - lng1);
-      const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
-      return 2 * R * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-    }
-
-    function groupCloseLocations(stops, tolerance = 15) {
-      const clusters = [];
-      stops.forEach(stop => {
-        let placed = false;
-        for (const c of clusters) {
-          const d = haversineDistance(c.lat, c.lng, parseFloat(stop.lat), parseFloat(stop.lng));
-          if (d < tolerance) {
-            c.items.push(stop);
-            if (stop.isStart) c.isStart = true;
-            if (stop.isEnd) c.isEnd = true;
-            placed = true;
-            break;
-          }
-        }
-        if (!placed) {
-          clusters.push({
-            lat: parseFloat(stop.lat),
-            lng: parseFloat(stop.lng),
-            items: [stop],
-            isStart: stop.isStart === true,
-            isEnd: stop.isEnd === true,
-          });
-        }
-      });
-      return clusters;
-    }
+    const ANIMATION_DURATION = 1000;
 
     // --- Initialize Map ---
     window.initMap = async function() {
       const { Map } = await google.maps.importLibrary("maps");
-      const { AdvancedMarkerElement, PinElement } = await google.maps.importLibrary("marker");
+      await google.maps.importLibrary("marker");
 
       map = new Map(document.getElementById("map"), {
-        center: { lat: 33.8938, lng: 35.5018 }, 
+        center: { lat: 33.8938, lng: 35.5018 },
         zoom: 12,
-        mapId: "48c2bb983bd19c1c44d95cb7", 
+        mapId: "48c2bb983bd19c1c44d95cb7",
         mapTypeControl: false,
         streetViewControl: false,
-        fullscreenControl: false
+        fullscreenControl: false,
       });
 
-      directionsService = new google.maps.DirectionsService();
-      directionsRenderer = new google.maps.DirectionsRenderer({
-          map: map,
-          suppressMarkers: true, // We draw custom green pins, hide the rest
-          preserveViewport: false, // Allow auto-zoom to route
-          polylineOptions: { strokeColor: "#1a73e8", strokeOpacity: 0.8, strokeWeight: 5 }
-      });
-
+      // Tell Flutter (or parent frame) that map is ready
       sendToFlutter({ action: 'mapIsReady' });
     };
 
     // --- Message Listener ---
-    window.addEventListener("message", function (event) {
+    window.addEventListener("message", function(event) {
       if (!event.data) return;
+
       let data = event.data;
-      if (typeof data === 'string') { try { data = JSON.parse(data); } catch(e){} }
+      if (typeof data === 'string') {
+        try { data = JSON.parse(data); } catch (e) {}
+      }
 
       if (data.action === "initParentMap") {
-          const rawStops = data.routeStops || []; 
-          const myMarkers = data.myMarkers || [];   
-          
-          myStopsData = myMarkers; 
-          
-          // 1. Run Phase 1: Clustering
-          const clusters = groupCloseLocations(rawStops);
-          
-          // 2. Run Phase 2: Routing (The Blue Line)
-          calculateRoadRoute(clusters);
+        const myMarkers = data.myMarkers || [];
+        myStopsData = myMarkers;
 
-          // 3. Draw Green Pins
-          drawMyChildren(myMarkers);
+        drawMyChildren(myMarkers);
+        fitToMarkersAndBus(); // initial fit (once)
       }
-      
+
       if (data.action === "updateBusLocation") {
-          updateBusPosition(data.lat, data.lng);
+        updateBusPosition(data.lat, data.lng);
       }
     });
 
-    // --- PHASE 2: LOGIC (The Routing) ---
-    function calculateRoadRoute(clusters) {
-       if (clusters.length < 2) return;
-
-       const startPoint = clusters.find(c => c.isStart);
-       const endPoint = clusters.find(c => c.isEnd);
-       if (!startPoint || !endPoint) return;
-
-       // Create Waypoints (Filter out start/end)
-       const waypoints = clusters
-           .filter(c => c !== startPoint && c !== endPoint)
-           .map(c => ({ location: {lat: c.lat, lng: c.lng}, stopover: true }));
-
-       // 🔥 THE MAGIC: optimizeWaypoints: true
-       // This guarantees the Blue Line matches the Driver's optimized path
-       directionsService.route({
-           origin: { lat: startPoint.lat, lng: startPoint.lng },
-           destination: { lat: endPoint.lat, lng: endPoint.lng },
-           waypoints: waypoints, 
-           travelMode: google.maps.TravelMode.DRIVING, 
-           optimizeWaypoints: true, 
-       }, (result, status) => {
-           if (status === "OK") {
-               directionsRenderer.setDirections(result);
-           } else {
-               console.warn("Routing failed: " + status);
-           }
-       });
-    }
-
-    // --- Draw Green Pins ---
+    // --- Draw Green Pins (multiple students) ---
     async function drawMyChildren(markersData) {
-        childMarkers.forEach(m => m.map = null);
-        childMarkers = [];
+      // Clear old markers
+      childMarkers.forEach(m => { m.map = null; });
+      childMarkers = [];
 
-        const { AdvancedMarkerElement, PinElement } = await google.maps.importLibrary("marker");
+      const { AdvancedMarkerElement, PinElement } = await google.maps.importLibrary("marker");
 
-        markersData.forEach(child => {
-            const pin = new PinElement({
-                background: CHILD_ICON_COLOR,
-                borderColor: "#ffffff",
-                glyphColor: "#ffffff",
-                scale: 1.1
-            });
+      markersData.forEach(child => {
+        const lat = parseFloat(child.lat);
+        const lng = parseFloat(child.lng);
+        if (!isFinite(lat) || !isFinite(lng)) return;
 
-            const marker = new AdvancedMarkerElement({
-                map: map,
-                position: { lat: child.lat, lng: child.lng },
-                content: pin.element,
-                title: child.name || "My Child"
-            });
-            
-            childMarkers.push(marker);
+        const pin = new PinElement({
+          background: CHILD_ICON_COLOR,
+          borderColor: "#ffffff",
+          glyphColor: "#ffffff",
+          scale: 1.1
         });
+
+        const marker = new AdvancedMarkerElement({
+          map: map,
+          position: { lat, lng },
+          content: pin.element,
+          title: child.name || "موقع الطالب",
+        });
+
+        childMarkers.push(marker);
+      });
     }
 
-    // --- Bus Animation ---
+    // --- Bus Animation / Updates ---
     function updateBusPosition(lat, lng) {
-        if (!lat || !lng) return;
-        const newPos = new google.maps.LatLng(lat, lng);
+      const nLat = parseFloat(lat);
+      const nLng = parseFloat(lng);
+      if (!isFinite(nLat) || !isFinite(nLng)) return;
 
-        if (!busMarker) {
-            busMarker = new google.maps.Marker({
-                map: map,
-                position: newPos,
-                icon: { 
-                    url: BUS_ICON_URL, 
-                    scaledSize: new google.maps.Size(45, 45), 
-                    anchor: new google.maps.Point(22.5, 22.5) 
-                },
-                zIndex: 1000
-            });
-            return;
-        }
+      const newPos = new google.maps.LatLng(nLat, nLng);
 
-        if (animationFrameId) cancelAnimationFrame(animationFrameId);
-        const startPos = busMarker.getPosition();
-        animateMarker(startPos, newPos);
-        calculateETA(newPos);
+      // First time: create marker and fit map (once)
+      if (!busMarker) {
+        busMarker = new google.maps.Marker({
+          map: map,
+          position: newPos,
+          icon: {
+            url: BUS_ICON_URL,
+            scaledSize: new google.maps.Size(45, 45),
+            anchor: new google.maps.Point(22.5, 22.5),
+          },
+          zIndex: 1000
+        });
+
+        fitToMarkersAndBus(); // if markers already exist, include bus too
+        return;
+      }
+
+      // Animate from current to new position
+      if (animationFrameId) cancelAnimationFrame(animationFrameId);
+      const startPos = busMarker.getPosition();
+      animateMarker(startPos, newPos);
     }
 
     function animateMarker(startLatLng, targetLatLng) {
-        animationStartTime = Date.now();
-        function step() {
-            const elapsed = Date.now() - animationStartTime;
-            const progress = Math.min(elapsed / ANIMATION_DURATION, 1);
+      animationStartTime = Date.now();
 
-            const currentLat = startLatLng.lat() + (targetLatLng.lat() - startLatLng.lat()) * progress;
-            const currentLng = startLatLng.lng() + (targetLatLng.lng() - startLatLng.lng()) * progress;
-            
-            busMarker.setPosition(new google.maps.LatLng(currentLat, currentLng));
+      function step() {
+        const elapsed = Date.now() - animationStartTime;
+        const progress = Math.min(elapsed / ANIMATION_DURATION, 1);
 
-            if (progress < 1) {
-                animationFrameId = requestAnimationFrame(step);
-            }
+        const currentLat = startLatLng.lat() + (targetLatLng.lat() - startLatLng.lat()) * progress;
+        const currentLng = startLatLng.lng() + (targetLatLng.lng() - startLatLng.lng()) * progress;
+
+        busMarker.setPosition(new google.maps.LatLng(currentLat, currentLng));
+
+        if (progress < 1) {
+          animationFrameId = requestAnimationFrame(step);
         }
-        step();
+      }
+      step();
     }
 
-    function calculateETA(busLatLng) {
-        if (myStopsData.length === 0) return;
-        
-        let minDist = Infinity;
-        myStopsData.forEach(child => {
-            const childLoc = new google.maps.LatLng(child.lat, child.lng);
-            const dist = google.maps.geometry.spherical.computeDistanceBetween(busLatLng, childLoc);
-            if (dist < minDist) minDist = dist;
-        });
+    // --- Fit map once to show bus + all student markers ---
+    function fitToMarkersAndBus() {
+      if (didInitialFit || !map) return;
 
-        const mins = Math.ceil(minDist / 500); 
-        
-        const badge = document.getElementById("eta-badge");
-        badge.style.display = "block";
-        
-        if (minDist < 100) {
-             badge.innerHTML = "🏁 الحافلة وصلت!";
-             badge.style.color = "#d32f2f";
-        } else {
-             badge.innerHTML = `⏱️ الوصول خلال ${mins} دقيقة`;
-             badge.style.color = "#1a73e8";
+      const bounds = new google.maps.LatLngBounds();
+      let hasAny = false;
+
+      // Add student markers
+      (myStopsData || []).forEach(m => {
+        const lat = parseFloat(m.lat);
+        const lng = parseFloat(m.lng);
+        if (isFinite(lat) && isFinite(lng)) {
+          bounds.extend(new google.maps.LatLng(lat, lng));
+          hasAny = true;
         }
+      });
+
+      // Add bus marker if exists
+      if (busMarker) {
+        bounds.extend(busMarker.getPosition());
+        hasAny = true;
+      }
+
+      if (hasAny) {
+        map.fitBounds(bounds, 60); // padding
+        didInitialFit = true;
+      }
     }
 
+    // --- Send to Flutter (web + mobile webview) ---
     function sendToFlutter(payload) {
-        if (window.FlutterChan) window.FlutterChan.postMessage(JSON.stringify(payload));
-        else window.parent.postMessage(payload, "*");
+      if (window.FlutterChan) {
+        window.FlutterChan.postMessage(JSON.stringify(payload));
+      } else {
+        window.parent.postMessage(payload, "*");
+      }
     }
   </script>
 </body>
