@@ -82,31 +82,39 @@
       }
     }
     // --- 2. CAMERA/RECENTER LOGIC ---
-    function recenterView() {
-      if (!isMapInit) return;
-      
-      const bounds = new google.maps.LatLngBounds();
-      let hasPoints = false;
+   function recenterView() {
+  if (!isMapInit || !map) return;
+  
+  const bounds = new google.maps.LatLngBounds();
+  let hasPoints = false;
 
-      if (busMarker && busMarker.position) {
-        bounds.extend(busMarker.position);
-        hasPoints = true;
-      }
+  // Add Bus
+  if (busMarker && busMarker.position) {
+    bounds.extend(busMarker.position);
+    hasPoints = true;
+  }
 
-      Object.values(studentMarkers).forEach(m => {
-        bounds.extend(m.position);
-        hasPoints = true;
-      });
-
-      if (hasPoints) {
-        map.fitBounds(bounds, { padding: 100 });
-      }
+  // Add Students
+  Object.values(studentMarkers).forEach(m => {
+    if (m.position) {
+      bounds.extend(m.position);
+      hasPoints = true;
     }
+  });
 
-    // --- 3. BRIDGE FUNCTION ---
-    window.handleDirectUpdate = function(lat, lng) {
-      updateBusUI({ lat: lat, lng: lng });
-    };
+  if (hasPoints) {
+    // 🔥 Use a small timeout to ensure the div is fully rendered
+    setTimeout(() => {
+      map.fitBounds(bounds);
+      
+      // Optional: Zoom out slightly after fitting if it feels too tight
+      const listener = google.maps.event.addListener(map, 'idle', () => {
+        if (map.getZoom() > 17) map.setZoom(17); 
+        google.maps.event.removeListener(listener);
+      });
+    }, 100);
+  }
+}
 
     // --- 4. SHARED UI UPDATE LOGIC ---
     function updateBusUI(data) {
