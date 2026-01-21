@@ -14,9 +14,10 @@
     
     /* 🔥 SMOOTH SLIDING CSS */
     .bus-marker-container {
-      transition: all 1.5s linear; /* Slightly less than the 3s update interval for buttery smoothness */
+      transition: all 1.5s linear; 
+      pointer-events: none;
     }
-  </script>
+  </style>
 </head>
 <body>
 
@@ -45,8 +46,8 @@
           center: { lat: 33.8938, lng: 35.5018 },
           zoom: 15,
           mapId: "48c2bb983bd19c1c44d95cb7",
-          disableDefaultUI: false, // Re-enabled to allow Satellite switch
-          mapTypeControl: true,    // ✅ SATELLITE VIEW TOGGLE
+          disableDefaultUI: false, 
+          mapTypeControl: true,    // ✅ SATELLITE TOGGLE
           zoomControl: true,
           streetViewControl: false,
           fullscreenControl: false
@@ -86,7 +87,6 @@
       
       const busPos = { lat, lng };
 
-      // Move or Create Bus
       if (!busMarker) {
         const busPin = new PinElement({ background: "#FBBC04", glyphText: "🚌" });
         const container = document.createElement('div');
@@ -103,7 +103,6 @@
         busMarker.position = busPos;
       }
 
-      // --- 4. SMART CAMERA LOGIC ---
       const bounds = new google.maps.LatLngBounds();
       bounds.extend(busPos);
       Object.values(studentMarkers).forEach(m => bounds.extend(m.position));
@@ -113,11 +112,9 @@
         const sPos = studentMarkers[firstId].position;
         const eta = calculateETA(busPos.lat, busPos.lng, sPos.lat, sPos.lng);
         
-        // Show ETA
         document.getElementById("eta-container").style.display = "block";
         document.getElementById("eta-content").innerHTML = `🚍 الباص على بعد ${eta.dist} كم (${eta.min} دقيقة)`;
 
-        // ✅ DRAW DOTTED LINE
         if (connectionLine) connectionLine.setMap(null);
         connectionLine = new google.maps.Polyline({
           path: [busPos, sPos],
@@ -132,17 +129,13 @@
           map: map
         });
 
-        // ✅ AUTO-ZOOM STRATEGY
-        if (eta.rawDist < 0.5) {
-          // If less than 500m away, don't jump the camera, just let them see the bus arrive
-          // This prevents the "Camera Shaking" when the bus is right outside the house
-        } else {
-          map.fitBounds(bounds, { padding: 100 });
+        if (eta.rawDist > 0.3) {
+           map.fitBounds(bounds, { padding: 80 });
         }
       }
     }
 
-    // --- 5. MESSAGE LISTENERS ---
+    // --- 4. MESSAGE LISTENERS ---
     window.addEventListener("message", async (event) => {
       const data = event.data;
       if (!data || !isMapInit) return;
