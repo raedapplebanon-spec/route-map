@@ -2,7 +2,7 @@
 <html lang="ar" dir="rtl">
 <head>
   <meta charset="UTF-8" />
-  <title>Assistant Route Map</title>
+  <title>Assistant Route Map (Stable v13)</title>
   
   <style>
     html, body { height: 100%; margin: 0; padding: 0; overflow: hidden; font-family: 'Segoe UI', Tahoma, sans-serif; }
@@ -46,7 +46,8 @@
     // --- Globals ---
     window.routeMarkers = [];
     
-    // 🔒 LOCK 1: Prevents Student Alert Spam
+    // 🔒 LOCK 1: Prevents Student Alert Spam (FIXED)
+    // We only clear this if the SHIFT changes, not every update.
     window.alertedStudentIds = new Set(); 
     
     let map, directionsService, directionsRenderer, infoWindow;
@@ -59,28 +60,22 @@
     let endStopLocation = null; 
     let pmLastStudentLocation = null; 
     
-    // 🔒 LOCK 2: Prevents Arrival Spam
     let hasTriggeredArrival = false;
     let hasLeftStartZone = false; 
 
-    // 🔒 LOCK 3: Signature to detect New Route vs Update
+    // Signature Logic
     let lastRouteSignature = ""; 
-    // 💰 MONEY SAVER: Geometry Signature (Location + Exclusion)
     let lastGeometrySignature = ""; 
 
     let userLocationMarker = null;
     let radarCircle = null;
     let isBusTrackingActive = false;
 
-    // 🔥 CONFIG: 300 meters
     const APPROACH_RADIUS = 300; 
-
     const MY_MAP_ID = "48c2bb983bd19c1c44d95cb7";
     const BUS_ICON_URL = "https://raedapplebanon-spec.github.io/route-map/school-bus_6122028.png"; 
 
-    // =========================================================
-    // ✅ 1. ANIMATION VARIABLES
-    // =========================================================
+    // Animation Vars
     let animationFrameId = null;
     let animationStartTime = 0;
     const ANIMATION_DURATION = 1000; 
@@ -227,9 +222,6 @@
         }, options);
     }
 
-    // =========================================================
-    // ✅ 2. THE SMOOTH UPDATE FUNCTION
-    // =========================================================
     function processLocationUpdate(lat, lng) {
          if (!lat || !lng) return;
 
@@ -267,9 +259,6 @@
          checkArrivalLogic(newLocObj); 
     }
 
-    // =========================================================
-    // ✅ 3. THE ANIMATION HELPER
-    // =========================================================
     function animateMarker(startLatLng, targetLatLng) {
         animationStartTime = Date.now();
         
@@ -290,9 +279,7 @@
         step();
     }
 
-    // =========================================================
-    // ✅ 4. LOGIC HANDLER (FIXED FOR DUPLICATES)
-    // =========================================================
+    // --- LOGIC HANDLER (FIXED) ---
     function checkArrivalLogic(myLocObj) {
          if (window.orderedStopIds && window.orderedStopIds.length > 0) {
              let firstPendingIndex = -1;
@@ -301,12 +288,11 @@
                  const markerObj = window.routeMarkers.find(m => m.items.some(item => item.id === id));
                  
                  if (markerObj) {
-                     // Filter out students we ALREADY alerted
                      const isPending = markerObj.items.some(s => 
                          (s.type === 'student' || s.type === 'employee') && 
                          s.status === 'pending' && 
                          !s.isExcluded &&
-                         !window.alertedStudentIds.has(s.id) // <--- THIS SAVES US
+                         !window.alertedStudentIds.has(s.id) // ✅ CHECK LOCK
                      );
                      if (isPending) { firstPendingIndex = i; break; }
                  }
@@ -332,19 +318,17 @@
                                  (s.type === 'student' || s.type === 'employee') && 
                                  s.status === 'pending' && 
                                  !s.isExcluded &&
-                                 !window.alertedStudentIds.has(s.id) // Double check before adding
+                                 !window.alertedStudentIds.has(s.id) // ✅ DOUBLE CHECK LOCK
                              );
                              
                              if (activeItems.length > 0) {
-                                 activeItems.forEach(s => window.alertedStudentIds.add(s.id)); // 🛑 ADD TO LOCK IMMEDIATELY
+                                 activeItems.forEach(s => window.alertedStudentIds.add(s.id)); // 🔒 LOCK
                                  batchIds.push(...activeItems.map(i => i.id));
                                  const namesAtThisStop = activeItems.map(s => s.name).join(" & ");
                                  batchNames.push(namesAtThisStop);
                                  console.log("➕ Adding to batch: " + namesAtThisStop);
                              }
                          } else {
-                             // If the first stop in sequence is far, don't check the next ones.
-                             // This prevents alerting Stop #5 when we are still far from Stop #1.
                              break; 
                          }
                      }
@@ -358,13 +342,13 @@
              }
          }
 
+         // Arrival Logic (Standard)
          if (currentRouteType === 'midday' && !hasLeftStartZone && startStopLocation) {
              const startLocObj = new google.maps.LatLng(startStopLocation.lat, startStopLocation.lng);
              const distFromStart = google.maps.geometry.spherical.computeDistanceBetween(myLocObj, startLocObj);
-             
              if (distFromStart > 500) { 
                  hasLeftStartZone = true;
-                 console.log("🔓 Bus has left the school zone. Arrival detection armed.");
+                 console.log("🔓 Bus left start zone.");
              }
          }
 
@@ -424,9 +408,10 @@
     });
 
     window.setRouteData = function(stops, shift, routeType) {
-      // 🔒 LOCK FIX: REMOVED ID FROM SIGNATURE 
-      // Only reset locks if Shift or Route Type changes. 
-      // Re-ordering stops or changing status should NOT clear memory.
+      // 🔒 THE CRITICAL FIX IS HERE
+      // We removed the "ID" from the signature.
+      // Now, locks ONLY reset if you change the SHIFT or ROUTE TYPE.
+      // Simply refreshing data will NOT clear the memory.
       const newSignature = shift + "_" + routeType; 
       
       if (newSignature !== lastRouteSignature) {
@@ -472,6 +457,8 @@
           });
       };
 
+      // ... (Rest of rendering logic remains unchanged for brevity, but it's included in the file)
+      // This part draws the pins and calls calculateRoadRoute like before.
       let validStopCounter = 0; 
 
       clusters.forEach((cluster) => {
