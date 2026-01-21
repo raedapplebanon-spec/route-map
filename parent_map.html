@@ -11,7 +11,12 @@
       display: none; text-align: right; border: 1px solid #eee;
     }
     .eta-text { font-size: 14px; font-weight: bold; color: #1a73e8; }
-  </style>
+    
+    /* 🔥 SMOOTH SLIDING CSS */
+    .bus-marker-container {
+      transition: all 1.5s linear; /* Slightly less than the 3s update interval for buttery smoothness */
+    }
+  </script>
 </head>
 <body>
 
@@ -24,6 +29,7 @@
     let map;
     let busMarker;
     let studentMarkers = {};
+    let connectionLine;
     let isMapInit = false;
     let AdvancedMarkerElement, PinElement;
 
@@ -39,8 +45,11 @@
           center: { lat: 33.8938, lng: 35.5018 },
           zoom: 15,
           mapId: "48c2bb983bd19c1c44d95cb7",
-          disableDefaultUI: true,
-          zoomControl: true
+          disableDefaultUI: false, // Re-enabled to allow Satellite switch
+          mapTypeControl: true,    // ✅ SATELLITE VIEW TOGGLE
+          zoomControl: true,
+          streetViewControl: false,
+          fullscreenControl: false
         });
 
         isMapInit = true;
@@ -60,17 +69,14 @@
       const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
       const distance = R * c; 
       const timeMinutes = Math.round((distance / 25) * 60) + 2;
-      return { dist: distance.toFixed(2), min: timeMinutes < 2 ? 2 : timeMinutes };
+      return { dist: distance.toFixed(2), min: timeMinutes < 2 ? 2 : timeMinutes, rawDist: distance };
     }
 
-    // --- 3. THE "BRIDGE" FUNCTION (FOR LIVE MOVEMENT) ---
-    // This allows Dart to call the JS directly to bypass event lag
     window.handleDirectUpdate = function(lat, lng) {
-      console.log("🚀 Direct Move Call:", lat, lng);
       updateBusUI({ lat: lat, lng: lng });
     };
 
-    // --- 4. SHARED UI UPDATE LOGIC ---
+    // --- 3. SHARED UI UPDATE LOGIC ---
     function updateBusUI(data) {
       if (!isMapInit) return;
       
@@ -83,32 +89,56 @@
       // Move or Create Bus
       if (!busMarker) {
         const busPin = new PinElement({ background: "#FBBC04", glyphText: "🚌" });
+        const container = document.createElement('div');
+        container.className = 'bus-marker-container';
+        container.appendChild(busPin.element);
+
         busMarker = new AdvancedMarkerElement({
           map: map,
           position: busPos,
-          content: busPin.element,
+          content: container,
           zIndex: 1000
         });
       } else {
         busMarker.position = busPos;
       }
 
-      // Auto-Zoom bounds
+      // --- 4. SMART CAMERA LOGIC ---
       const bounds = new google.maps.LatLngBounds();
       bounds.extend(busPos);
       Object.values(studentMarkers).forEach(m => bounds.extend(m.position));
 
-      if (Object.keys(studentMarkers).length > 0) {
-        map.fitBounds(bounds, { padding: 80 });
-      }
-
-      // Update ETA
       const firstId = Object.keys(studentMarkers)[0];
       if (firstId) {
         const sPos = studentMarkers[firstId].position;
         const eta = calculateETA(busPos.lat, busPos.lng, sPos.lat, sPos.lng);
+        
+        // Show ETA
         document.getElementById("eta-container").style.display = "block";
         document.getElementById("eta-content").innerHTML = `🚍 الباص على بعد ${eta.dist} كم (${eta.min} دقيقة)`;
+
+        // ✅ DRAW DOTTED LINE
+        if (connectionLine) connectionLine.setMap(null);
+        connectionLine = new google.maps.Polyline({
+          path: [busPos, sPos],
+          geodesic: true,
+          strokeColor: "#1a73e8",
+          strokeOpacity: 0,
+          icons: [{
+            icon: { path: 'M 0,-1 0,1', strokeOpacity: 1, scale: 2 },
+            offset: '0',
+            repeat: '10px'
+          }],
+          map: map
+        });
+
+        // ✅ AUTO-ZOOM STRATEGY
+        if (eta.rawDist < 0.5) {
+          // If less than 500m away, don't jump the camera, just let them see the bus arrive
+          // This prevents the "Camera Shaking" when the bus is right outside the house
+        } else {
+          map.fitBounds(bounds, { padding: 100 });
+        }
       }
     }
 
