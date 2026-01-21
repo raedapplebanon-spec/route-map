@@ -27,9 +27,7 @@
     let isMapInit = false;
     let AdvancedMarkerElement, PinElement;
 
-    // Use a simpler icon URL or standard pin
-    const BUS_ICON_URL = "https://maps.google.com/mapfiles/kml/shapes/bus.png";
-
+    // --- 1. INITIALIZATION ---
     async function initMap() {
       try {
         const { Map } = await google.maps.importLibrary("maps");
@@ -52,6 +50,7 @@
       }
     }
 
+    // --- 2. HELPERS ---
     function calculateETA(lat1, lon1, lat2, lon2) {
       const R = 6371;
       const dLat = (lat2 - lat1) * Math.PI / 180;
@@ -64,6 +63,56 @@
       return { dist: distance.toFixed(2), min: timeMinutes < 2 ? 2 : timeMinutes };
     }
 
+    // --- 3. THE "BRIDGE" FUNCTION (FOR LIVE MOVEMENT) ---
+    // This allows Dart to call the JS directly to bypass event lag
+    window.handleDirectUpdate = function(lat, lng) {
+      console.log("🚀 Direct Move Call:", lat, lng);
+      updateBusUI({ lat: lat, lng: lng });
+    };
+
+    // --- 4. SHARED UI UPDATE LOGIC ---
+    function updateBusUI(data) {
+      if (!isMapInit) return;
+      
+      const lat = parseFloat(data.lat);
+      const lng = parseFloat(data.lng);
+      if (isNaN(lat) || isNaN(lng)) return;
+      
+      const busPos = { lat, lng };
+
+      // Move or Create Bus
+      if (!busMarker) {
+        const busPin = new PinElement({ background: "#FBBC04", glyphText: "🚌" });
+        busMarker = new AdvancedMarkerElement({
+          map: map,
+          position: busPos,
+          content: busPin.element,
+          zIndex: 1000
+        });
+      } else {
+        busMarker.position = busPos;
+      }
+
+      // Auto-Zoom bounds
+      const bounds = new google.maps.LatLngBounds();
+      bounds.extend(busPos);
+      Object.values(studentMarkers).forEach(m => bounds.extend(m.position));
+
+      if (Object.keys(studentMarkers).length > 0) {
+        map.fitBounds(bounds, { padding: 80 });
+      }
+
+      // Update ETA
+      const firstId = Object.keys(studentMarkers)[0];
+      if (firstId) {
+        const sPos = studentMarkers[firstId].position;
+        const eta = calculateETA(busPos.lat, busPos.lng, sPos.lat, sPos.lng);
+        document.getElementById("eta-container").style.display = "block";
+        document.getElementById("eta-content").innerHTML = `🚍 الباص على بعد ${eta.dist} كم (${eta.min} دقيقة)`;
+      }
+    }
+
+    // --- 5. MESSAGE LISTENERS ---
     window.addEventListener("message", async (event) => {
       const data = event.data;
       if (!data || !isMapInit) return;
@@ -75,9 +124,8 @@
         myMarkers.forEach(m => {
           const pos = { lat: parseFloat(m.lat), lng: parseFloat(m.lng) };
           if (!studentMarkers[m.id]) {
-             // Create Student Pin
-             const pin = new PinElement({ background: "#00c853", glyphColor: "white" });
-             studentMarkers[m.id] = new AdvancedMarkerElement({
+            const pin = new PinElement({ background: "#00c853", glyphColor: "white" });
+            studentMarkers[m.id] = new AdvancedMarkerElement({
               map: map,
               position: pos,
               content: pin.element,
@@ -90,42 +138,7 @@
       }
 
       if (data.action === "updateBusLocation") {
-        const lat = parseFloat(data.lat);
-        const lng = parseFloat(data.lng);
-        console.log("📍 Bus Movement Received:", lat, lng); // CHECK YOUR CONSOLE
-
-        if (isNaN(lat) || isNaN(lng)) return;
-        const busPos = { lat, lng };
-
-        if (!busMarker) {
-          // Fallback: If icon fails, show a yellow pin
-          const busPin = new PinElement({ background: "#FBBC04", glyphText: "🚌" });
-          busMarker = new AdvancedMarkerElement({
-            map: map,
-            position: busPos,
-            content: busPin.element,
-            zIndex: 1000
-          });
-        } else {
-          busMarker.position = busPos;
-        }
-
-        // Auto-Zoom to keep both in view
-        const bounds = new google.maps.LatLngBounds();
-        bounds.extend(busPos);
-        Object.values(studentMarkers).forEach(m => bounds.extend(m.position));
-
-        if (Object.keys(studentMarkers).length > 0) {
-          map.fitBounds(bounds, { padding: 80 });
-        }
-
-        const firstId = Object.keys(studentMarkers)[0];
-        if (firstId) {
-          const sPos = studentMarkers[firstId].position;
-          const eta = calculateETA(busPos.lat, busPos.lng, sPos.lat, sPos.lng);
-          document.getElementById("eta-container").style.display = "block";
-          document.getElementById("eta-content").innerHTML = `🚍 الباص على بعد ${eta.dist} كم (${eta.min} دقيقة)`;
-        }
+        updateBusUI(data);
       }
     });
   </script>
