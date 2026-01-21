@@ -2,272 +2,262 @@
 <html lang="ar" dir="rtl">
 <head>
   <meta charset="UTF-8" />
-  <title>Parent Bus Map</title>
+  <title>Parent Map</title>
   
   <style>
     html, body { height: 100%; margin: 0; padding: 0; overflow: hidden; font-family: 'Segoe UI', Tahoma, sans-serif; }
     #map { height: 100%; width: 100%; }
     
-    .eta-box {
-        display: none; 
-        position: absolute; 
-        top: 20px; 
-        right: 20px; 
-        background: rgba(255, 255, 255, 0.95); 
-        padding: 15px 20px; 
-        border-radius: 12px; 
-        box-shadow: 0 4px 15px rgba(0,0,0,0.2);
-        z-index: 999;
-        text-align: right;
-        min-width: 180px;
-        border: 1px solid #f0f0f0;
+    .eta-badge {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      background: white;
+      padding: 8px 12px;
+      border-radius: 20px;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+      font-size: 14px;
+      font-weight: bold;
+      color: #1a73e8;
+      display: none; 
+      z-index: 999;
     }
-    .eta-time { font-size: 24px; font-weight: 800; color: #1a73e8; display: block; margin-bottom: 5px; }
-    .eta-dist { font-size: 14px; color: #555; font-weight: 500; }
-    .eta-stops { font-size: 13px; color: #d93025; margin-top: 5px; display: block; font-weight: 600; }
   </style>
 
-  <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCYaJ4Gjq36mq8swYgjNXOYr5mKZi45niA&callback=initMap&libraries=marker,geometry&loading=async&v=weekly" async defer></script>
+  <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCYaJ4Gjq36mq8swYgjNXOYr5mKZi45niA&callback=initMap&libraries=marker,places,geometry&loading=async&v=weekly" async defer></script>
 </head>
 
 <body>
-  <div id="eta-box" class="eta-box">
-      <span id="eta-time-text" class="eta-time">-- دقيقة</span>
-      <span id="eta-dist-text" class="eta-dist">جاري الحساب...</span>
-      <span id="eta-stops-text" class="eta-stops"></span>
-  </div>
-  
+  <div id="eta-badge" class="eta-badge">🕑 جاري الحساب...</div>
   <div id="map"></div>
 
   <script>
-    const MY_MAP_ID = "48c2bb983bd19c1c44d95cb7";
+    // --- Configuration ---
     const BUS_ICON_URL = "https://raedapplebanon-spec.github.io/route-map/school-bus_6122028.png";
-    
-    let map, directionsService, activeRenderer, staticRenderer;
+    const CHILD_ICON_COLOR = "#00c853"; 
+
+    // --- State ---
+    let map;
+    let directionsService, directionsRenderer;
     let busMarker = null;
-    let mapReady = false;
-    let pendingData = null;
+    let childMarkers = []; 
+    let myStopsData = []; 
     
-    let allStops = [];
-    let myTargetStop = null;
+    // Animation Globals
+    let animationFrameId = null;
+    let animationStartTime = 0;
+    const ANIMATION_DURATION = 1000; 
 
-    // 🔥 LOCK VARIABLE: Ensures we calculate only ONCE
-    let hasCalculatedInitialRoute = false; 
+    // --- PHASE 1: LOGIC (The Clustering) ---
+    function haversineDistance(lat1, lng1, lat2, lng2) {
+      const R = 6371e3; 
+      const toRad = x => x * Math.PI / 180;
+      const dLat = toRad(lat2 - lat1);
+      const dLng = toRad(lng2 - lng1);
+      const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+      return 2 * R * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    }
 
+    function groupCloseLocations(stops, tolerance = 15) {
+      const clusters = [];
+      stops.forEach(stop => {
+        let placed = false;
+        for (const c of clusters) {
+          const d = haversineDistance(c.lat, c.lng, parseFloat(stop.lat), parseFloat(stop.lng));
+          if (d < tolerance) {
+            c.items.push(stop);
+            if (stop.isStart) c.isStart = true;
+            if (stop.isEnd) c.isEnd = true;
+            placed = true;
+            break;
+          }
+        }
+        if (!placed) {
+          clusters.push({
+            lat: parseFloat(stop.lat),
+            lng: parseFloat(stop.lng),
+            items: [stop],
+            isStart: stop.isStart === true,
+            isEnd: stop.isEnd === true,
+          });
+        }
+      });
+      return clusters;
+    }
+
+    // --- Initialize Map ---
     window.initMap = async function() {
-      try {
-        const { Map } = await google.maps.importLibrary("maps");
-        const { AdvancedMarkerElement } = await google.maps.importLibrary("marker");
+      const { Map } = await google.maps.importLibrary("maps");
+      const { AdvancedMarkerElement, PinElement } = await google.maps.importLibrary("marker");
 
-        map = new Map(document.getElementById("map"), {
-          center: { lat: 33.8938, lng: 35.5018 },
-          zoom: 12,
-          mapId: MY_MAP_ID,
-          mapTypeControl: false,
-          streetViewControl: false,
-          fullscreenControl: false,
-          zoomControl: true
-        });
+      map = new Map(document.getElementById("map"), {
+        center: { lat: 33.8938, lng: 35.5018 }, 
+        zoom: 12,
+        mapId: "48c2bb983bd19c1c44d95cb7", 
+        mapTypeControl: false,
+        streetViewControl: false,
+        fullscreenControl: false
+      });
 
-        directionsService = new google.maps.DirectionsService();
+      directionsService = new google.maps.DirectionsService();
+      directionsRenderer = new google.maps.DirectionsRenderer({
+          map: map,
+          suppressMarkers: true, // We draw custom green pins, hide the rest
+          preserveViewport: false, // Allow auto-zoom to route
+          polylineOptions: { strokeColor: "#1a73e8", strokeOpacity: 0.8, strokeWeight: 5 }
+      });
 
-        // 1. Grey Line (Full Route Context)
-        staticRenderer = new google.maps.DirectionsRenderer({
-            map: map,
-            suppressMarkers: true,
-            preserveViewport: true,
-            polylineOptions: { strokeColor: "#9aa0a6", strokeOpacity: 0.5, strokeWeight: 5 }
-        });
-
-        // 2. Blue Line (Bus -> Home)
-        activeRenderer = new google.maps.DirectionsRenderer({
-            map: map,
-            suppressMarkers: true,
-            preserveViewport: true, // Don't zoom out when this draws
-            polylineOptions: { strokeColor: "#1a73e8", strokeOpacity: 0.9, strokeWeight: 6 }
-        });
-
-        mapReady = true;
-        if (pendingData) { window.setParentRoute(pendingData); pendingData = null; }
-        sendToFlutter({ action: 'mapIsReady' });
-      } catch (e) { console.error("❌ initMap Failed:", e); }
+      sendToFlutter({ action: 'mapIsReady' });
     };
 
+    // --- Message Listener ---
     window.addEventListener("message", function (event) {
       if (!event.data) return;
       let data = event.data;
       if (typeof data === 'string') { try { data = JSON.parse(data); } catch(e){} }
-      if (data.action === "setParentRoute") {
-          if (mapReady) window.setParentRoute(data.stops);
-          else pendingData = data.stops;
+
+      if (data.action === "initParentMap") {
+          const rawStops = data.routeStops || []; 
+          const myMarkers = data.myMarkers || [];   
+          
+          myStopsData = myMarkers; 
+          
+          // 1. Run Phase 1: Clustering
+          const clusters = groupCloseLocations(rawStops);
+          
+          // 2. Run Phase 2: Routing (The Blue Line)
+          calculateRoadRoute(clusters);
+
+          // 3. Draw Green Pins
+          drawMyChildren(myMarkers);
       }
-      if (data.action === "updateBusLocation") window.updateBusLocation(data.lat, data.lng);
+      
+      if (data.action === "updateBusLocation") {
+          updateBusPosition(data.lat, data.lng);
+      }
     });
 
-    window.setParentRoute = function(stops) {
-        if (!stops || stops.length < 2) return;
-        allStops = stops; 
-        
-        // Find Parent's Stop
-        const myStops = stops.filter(s => s.isVisible && !s.isStart && !s.isEnd);
-        if (myStops.length > 0) myTargetStop = myStops[myStops.length - 1]; 
-        else myTargetStop = stops[stops.length - 1]; 
+    // --- PHASE 2: LOGIC (The Routing) ---
+    function calculateRoadRoute(clusters) {
+       if (clusters.length < 2) return;
 
-        // Draw Pins
-        if (window.myMarkers) window.myMarkers.forEach(m => m.map = null);
-        window.myMarkers = [];
-        stops.forEach(stop => { if (stop.isVisible) createMarker(stop); });
+       const startPoint = clusters.find(c => c.isStart);
+       const endPoint = clusters.find(c => c.isEnd);
+       if (!startPoint || !endPoint) return;
 
-        // Draw Grey Line (Static Route) Immediately
-        drawStaticRoute(stops);
-    };
+       // Create Waypoints (Filter out start/end)
+       const waypoints = clusters
+           .filter(c => c !== startPoint && c !== endPoint)
+           .map(c => ({ location: {lat: c.lat, lng: c.lng}, stopover: true }));
 
-    window.updateBusLocation = function(lat, lng) {
-        const busPos = { lat: lat, lng: lng };
-        
-        // 1. Move Bus Icon (Always happens)
-        if (!busMarker) {
-            document.getElementById("eta-box").style.display = "block"; // Show box when bus appears
-            const img = document.createElement("img");
-            img.src = BUS_ICON_URL;
-            img.style.width = "45px";
-            img.style.height = "45px";
-            busMarker = new google.maps.marker.AdvancedMarkerElement({
-                map: map,
-                position: busPos,
-                content: img,
-                title: "Bus",
-                zIndex: 999
+       // 🔥 THE MAGIC: optimizeWaypoints: true
+       // This guarantees the Blue Line matches the Driver's optimized path
+       directionsService.route({
+           origin: { lat: startPoint.lat, lng: startPoint.lng },
+           destination: { lat: endPoint.lat, lng: endPoint.lng },
+           waypoints: waypoints, 
+           travelMode: google.maps.TravelMode.DRIVING, 
+           optimizeWaypoints: true, 
+       }, (result, status) => {
+           if (status === "OK") {
+               directionsRenderer.setDirections(result);
+           } else {
+               console.warn("Routing failed: " + status);
+           }
+       });
+    }
+
+    // --- Draw Green Pins ---
+    async function drawMyChildren(markersData) {
+        childMarkers.forEach(m => m.map = null);
+        childMarkers = [];
+
+        const { AdvancedMarkerElement, PinElement } = await google.maps.importLibrary("marker");
+
+        markersData.forEach(child => {
+            const pin = new PinElement({
+                background: CHILD_ICON_COLOR,
+                borderColor: "#ffffff",
+                glyphColor: "#ffffff",
+                scale: 1.1
             });
-        } else {
-            busMarker.position = busPos;
+
+            const marker = new AdvancedMarkerElement({
+                map: map,
+                position: { lat: child.lat, lng: child.lng },
+                content: pin.element,
+                title: child.name || "My Child"
+            });
+            
+            childMarkers.push(marker);
+        });
+    }
+
+    // --- Bus Animation ---
+    function updateBusPosition(lat, lng) {
+        if (!lat || !lng) return;
+        const newPos = new google.maps.LatLng(lat, lng);
+
+        if (!busMarker) {
+            busMarker = new google.maps.Marker({
+                map: map,
+                position: newPos,
+                icon: { 
+                    url: BUS_ICON_URL, 
+                    scaledSize: new google.maps.Size(45, 45), 
+                    anchor: new google.maps.Point(22.5, 22.5) 
+                },
+                zIndex: 1000
+            });
+            return;
         }
 
-        // 2. Calculate Route & ETA (ONLY ONCE)
-        if (!hasCalculatedInitialRoute && myTargetStop) {
-            hasCalculatedInitialRoute = true; // 🔒 Lock it immediately
-            calculateOneTimeRoute(busPos);
-        }
-    };
+        if (animationFrameId) cancelAnimationFrame(animationFrameId);
+        const startPos = busMarker.getPosition();
+        animateMarker(startPos, newPos);
+        calculateETA(newPos);
+    }
 
-    function calculateOneTimeRoute(busPos) {
-        // Logic: Calculate path from Bus Position (Right Now) -> Target Stop
+    function animateMarker(startLatLng, targetLatLng) {
+        animationStartTime = Date.now();
+        function step() {
+            const elapsed = Date.now() - animationStartTime;
+            const progress = Math.min(elapsed / ANIMATION_DURATION, 1);
+
+            const currentLat = startLatLng.lat() + (targetLatLng.lat() - startLatLng.lat()) * progress;
+            const currentLng = startLatLng.lng() + (targetLatLng.lng() - startLatLng.lng()) * progress;
+            
+            busMarker.setPosition(new google.maps.LatLng(currentLat, currentLng));
+
+            if (progress < 1) {
+                animationFrameId = requestAnimationFrame(step);
+            }
+        }
+        step();
+    }
+
+    function calculateETA(busLatLng) {
+        if (myStopsData.length === 0) return;
         
-        // Find intermediate stops for accuracy
-        let closestIndex = -1;
-        let minDistance = Infinity;
-        const busLatLng = new google.maps.LatLng(busPos.lat, busPos.lng);
-
-        allStops.forEach((stop, index) => {
-            const stopLatLng = new google.maps.LatLng(stop.lat, stop.lng);
-            const dist = google.maps.geometry.spherical.computeDistanceBetween(busLatLng, stopLatLng);
-            if (dist < minDistance) { minDistance = dist; closestIndex = index; }
+        let minDist = Infinity;
+        myStopsData.forEach(child => {
+            const childLoc = new google.maps.LatLng(child.lat, child.lng);
+            const dist = google.maps.geometry.spherical.computeDistanceBetween(busLatLng, childLoc);
+            if (dist < minDist) minDist = dist;
         });
 
-        const targetIndex = allStops.indexOf(myTargetStop);
-
-        // Prep Waypoints (Bus -> ... -> Target)
-        let waypoints = [];
-        if (closestIndex > -1 && closestIndex < targetIndex) {
-            // Get stops in between
-            const rawSlice = allStops.slice(closestIndex, targetIndex);
-            // Filter unique locations to optimize API waypoint limit
-            const uniqueSlice = filterUniqueLocations(rawSlice);
-            waypoints = uniqueSlice.map(s => ({ location: { lat: s.lat, lng: s.lng }, stopover: false }));
+        const mins = Math.ceil(minDist / 500); 
+        
+        const badge = document.getElementById("eta-badge");
+        badge.style.display = "block";
+        
+        if (minDist < 100) {
+             badge.innerHTML = "🏁 الحافلة وصلت!";
+             badge.style.color = "#d32f2f";
+        } else {
+             badge.innerHTML = `⏱️ الوصول خلال ${mins} دقيقة`;
+             badge.style.color = "#1a73e8";
         }
-
-        // Call API
-        directionsService.route({
-            origin: busPos,
-            destination: { lat: myTargetStop.lat, lng: myTargetStop.lng },
-            waypoints: waypoints,
-            travelMode: google.maps.TravelMode.DRIVING,
-        }, (result, status) => {
-            if (status === "OK") {
-                // Draw Blue Line
-                activeRenderer.setDirections(result);
-                
-                // Calculate ETA
-                let driveTimeSec = 0;
-                let distanceMeters = 0;
-                result.routes[0].legs.forEach(leg => {
-                    driveTimeSec += leg.duration.value;
-                    distanceMeters += leg.distance.value;
-                });
-
-                // Calculate Stops Buffer
-                // We assume waypoints length represents the number of stops
-                // (Since we filtered unique locations above)
-                const stopsCount = waypoints.length;
-                const stopBufferSec = stopsCount * 60; // 1 min per stop
-
-                const totalMinutes = Math.ceil((driveTimeSec + stopBufferSec) / 60);
-                const totalKm = (distanceMeters / 1000).toFixed(1);
-
-                // Set Text (Static)
-                document.getElementById("eta-time-text").innerText = totalMinutes + " دقيقة";
-                document.getElementById("eta-dist-text").innerText = totalKm + " كم";
-                
-                if (stopsCount > 0) {
-                     document.getElementById("eta-stops-text").innerText = "يوجد " + stopsCount + " توقف";
-                } else {
-                     document.getElementById("eta-stops-text").innerText = "أنت المحطة التالية";
-                }
-            } else {
-                console.warn("One-Time Route Failed", status);
-                document.getElementById("eta-dist-text").innerText = "تعذر الحساب";
-            }
-        });
-    }
-
-    function drawStaticRoute(stops) {
-        const start = stops[0];
-        const end = stops[stops.length - 1];
-        // Use filtered waypoints for the grey line too
-        const rawWaypoints = stops.slice(1, -1);
-        const uniqueWaypoints = filterUniqueLocations(rawWaypoints);
-        const waypoints = uniqueWaypoints.map(s => ({ location: { lat: s.lat, lng: s.lng }, stopover: false }));
-
-        directionsService.route({
-            origin: { lat: start.lat, lng: start.lng },
-            destination: { lat: end.lat, lng: end.lng },
-            waypoints: waypoints,
-            travelMode: google.maps.TravelMode.DRIVING,
-        }, (result, status) => {
-            if (status === "OK") {
-                staticRenderer.setDirections(result);
-                // Fit bounds to full route
-                const bounds = new google.maps.LatLngBounds();
-                stops.forEach(s => bounds.extend({ lat: s.lat, lng: s.lng }));
-                map.fitBounds(bounds);
-            }
-        });
-    }
-
-    function filterUniqueLocations(stops) {
-        if (!stops || stops.length === 0) return [];
-        const uniqueStops = [];
-        stops.forEach(stop => {
-            const stopLatLng = new google.maps.LatLng(stop.lat, stop.lng);
-            let isDuplicate = false;
-            for (const existing of uniqueStops) {
-                const existingLatLng = new google.maps.LatLng(existing.lat, existing.lng);
-                const dist = google.maps.geometry.spherical.computeDistanceBetween(stopLatLng, existingLatLng);
-                if (dist < 20) { isDuplicate = true; break; }
-            }
-            if (!isDuplicate) uniqueStops.push(stop);
-        });
-        return uniqueStops;
-    }
-
-    function createMarker(stop) {
-        let pinBackground = "#1a73e8"; 
-        let glyphText = "🏠"; 
-        if (stop.isStart) { pinBackground = "#00c853"; glyphText = "S"; }
-        else if (stop.isEnd) { pinBackground = "#d50000"; glyphText = "E"; }
-        const pin = new google.maps.marker.PinElement({ background: pinBackground, borderColor: "#FFFFFF", glyphColor: "#FFFFFF", glyphText: glyphText, scale: 1.0 });
-        const marker = new google.maps.marker.AdvancedMarkerElement({ map: map, position: { lat: stop.lat, lng: stop.lng }, content: pin.element, title: stop.name });
-        window.myMarkers.push(marker);
     }
 
     function sendToFlutter(payload) {
