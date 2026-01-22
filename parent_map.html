@@ -64,7 +64,19 @@
           fullscreenControl: false
         });
 
-        // Add Recenter Button logic here... (omitted for brevity)
+        // ✅ RECENTER BUTTON RESTORED
+        const recenterBtn = document.createElement("button");
+        recenterBtn.innerHTML = "🎯 إعادة ضبط العرض";
+        recenterBtn.classList.add("custom-map-control");
+        recenterBtn.addEventListener("click", () => {
+          isUserPanned = false;
+          recenterView();
+        });
+
+        map.controls[google.maps.ControlPosition.RIGHT_BOTTOM].push(recenterBtn);
+
+        // Detect if user starts dragging the map
+        map.addListener("dragstart", () => { isUserPanned = true; });
 
         isMapInit = true;
         console.log("✅ Parent Map Ready");
@@ -81,40 +93,50 @@
         console.error("❌ Init Error: ", e);
       }
     }
+
     // --- 2. CAMERA/RECENTER LOGIC ---
-   function recenterView() {
-  if (!isMapInit || !map) return;
-  
-  const bounds = new google.maps.LatLngBounds();
-  let hasPoints = false;
-
-  // Add Bus
-  if (busMarker && busMarker.position) {
-    bounds.extend(busMarker.position);
-    hasPoints = true;
-  }
-
-  // Add Students
-  Object.values(studentMarkers).forEach(m => {
-    if (m.position) {
-      bounds.extend(m.position);
-      hasPoints = true;
-    }
-  });
-
-  if (hasPoints) {
-    // 🔥 Use a small timeout to ensure the div is fully rendered
-    setTimeout(() => {
-      map.fitBounds(bounds);
+    function recenterView() {
+      if (!isMapInit || !map) return;
       
-      // Optional: Zoom out slightly after fitting if it feels too tight
-      const listener = google.maps.event.addListener(map, 'idle', () => {
-        if (map.getZoom() > 17) map.setZoom(17); 
-        google.maps.event.removeListener(listener);
+      const bounds = new google.maps.LatLngBounds();
+      let hasPoints = false;
+
+      if (busMarker && busMarker.position) {
+        bounds.extend(busMarker.position);
+        hasPoints = true;
+      }
+
+      Object.values(studentMarkers).forEach(m => {
+        if (m.position) {
+          bounds.extend(m.position);
+          hasPoints = true;
+        }
       });
-    }, 100);
-  }
-}
+
+      if (hasPoints) {
+        // 🔥 TIMEOUT FIX: Ensures map size is stable before zooming
+        setTimeout(() => {
+          map.fitBounds(bounds, {
+            top: 50,
+            bottom: 50,
+            left: 50,
+            right: 50
+          });
+
+          // Prevent extreme zoom
+          const listener = google.maps.event.addListener(map, 'idle', () => {
+            if (map.getZoom() > 16) map.setZoom(16);
+            google.maps.event.removeListener(listener);
+          });
+        }, 150);
+      }
+    }
+
+    // --- 3. BRIDGE FUNCTION (RESTORED) ---
+    // This is required for the mobile app to talk to JS
+    window.handleDirectUpdate = function(lat, lng) {
+      updateBusUI({ lat: lat, lng: lng });
+    };
 
     // --- 4. SHARED UI UPDATE LOGIC ---
     function updateBusUI(data) {
