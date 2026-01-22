@@ -6,12 +6,10 @@
   <style>
     html, body, #map { height: 100%; margin: 0; padding: 0; font-family: 'Segoe UI', sans-serif; }
     
-    /* REMOVED CSS TRANSITION - We use JS Animation now for real smoothness */
     .bus-marker-container {
       pointer-events: none;
     }
 
-    /* 🎯 RECENTER BUTTON CSS */
     .custom-map-control {
       background-color: #fff;
       border: 0;
@@ -64,13 +62,14 @@
           fullscreenControl: false
         });
 
-        // ✅ RECENTER BUTTON
+        // RECENTER BUTTON
         const recenterBtn = document.createElement("button");
         recenterBtn.innerHTML = "🎯 إعادة ضبط العرض";
         recenterBtn.classList.add("custom-map-control");
         recenterBtn.addEventListener("click", () => {
           isUserPanned = false;
-          recenterView();
+          // Only zoom/fit when the user explicitly asks for it
+          recenterView(true); 
         });
 
         map.controls[google.maps.ControlPosition.RIGHT_BOTTOM].push(recenterBtn);
@@ -81,7 +80,7 @@
         isMapInit = true;
         console.log("✅ Parent Map Ready");
 
-        // 🔥 Tell Flutter we are ready
+        // Notify Flutter
         const readyPayload = { action: "mapIsReady" };
         if (window.chrome && window.chrome.webview) {
             window.chrome.webview.postMessage(readyPayload);
@@ -96,41 +95,36 @@
 
     // --- 2. SMOOTH ANIMATION LOGIC ---
     function animateMarker(marker, targetLat, targetLng) {
-      // Get start position (handle both object and literal formats)
       const startPos = marker.position;
       const startLat = (typeof startPos.lat === 'function') ? startPos.lat() : startPos.lat;
       const startLng = (typeof startPos.lng === 'function') ? startPos.lng() : startPos.lng;
 
       const startTime = performance.now();
-      const duration = 2000; // Slide over 2 seconds (matches typical update speed)
+      const duration = 2000; 
 
-      // Cancel any existing animation to prevent conflict
       if (animationFrameId) cancelAnimationFrame(animationFrameId);
 
       function step(currentTime) {
         const elapsed = currentTime - startTime;
         const progress = Math.min(elapsed / duration, 1);
-
-        // Calculate intermediate position
         const currentLat = startLat + (targetLat - startLat) * progress;
         const currentLng = startLng + (targetLng - startLng) * progress;
 
-        // Move marker
         marker.position = { lat: currentLat, lng: currentLng };
 
-        // Continue if not finished
         if (progress < 1) {
           animationFrameId = requestAnimationFrame(step);
         } else {
           animationFrameId = null;
         }
       }
-
       animationFrameId = requestAnimationFrame(step);
     }
 
     // --- 3. RECENTER LOGIC ---
-    function recenterView() {
+    // Added 'forceFit' parameter. 
+    // If true (Button Click), we Zoom. If false (Live Update), we just Pan.
+    function recenterView(forceFit = false) {
       if (!isMapInit || !map) return;
       
       const bounds = new google.maps.LatLngBounds();
@@ -148,15 +142,12 @@
         }
       });
 
-      if (hasPoints) {
-        setTimeout(() => {
-          map.fitBounds(bounds, { top: 50, bottom: 50, left: 50, right: 50 });
-          // Prevent zoom becoming too close
-          const listener = google.maps.event.addListener(map, 'idle', () => {
-            if (map.getZoom() > 17) map.setZoom(17);
-            google.maps.event.removeListener(listener);
-          });
-        }, 100);
+      if (hasPoints && forceFit) {
+        // 🔥 Only change ZOOM if explicitly requested (Button or First Load)
+        map.fitBounds(bounds, { top: 50, bottom: 50, left: 50, right: 50 });
+      } else if (busMarker && !isUserPanned) {
+        // 🔥 Otherwise, just PAN to the bus (Smoother, no zooming)
+        map.panTo(busMarker.position);
       }
     }
 
@@ -176,7 +167,6 @@
       const busPos = { lat, lng };
 
       if (!busMarker) {
-        // Create marker instantly if it doesn't exist
         const busPin = new PinElement({ background: "#FBBC04", glyphText: "🚌" });
         const container = document.createElement('div');
         container.className = 'bus-marker-container';
@@ -189,12 +179,12 @@
           zIndex: 1000
         });
       } else {
-        // 🔥 ANIMATE to new position instead of jumping
         animateMarker(busMarker, lat, lng);
       }
 
       if (!isUserPanned) {
-        recenterView();
+        // 🔥 Call with FALSE so we don't Zoom, we only Pan
+        recenterView(false); 
       }
     }
 
@@ -217,7 +207,8 @@
             });
           }
         });
-        recenterView();
+        // On first load, we DO want to Zoom/Fit
+        recenterView(true); 
       }
 
       if (data.action === "updateBusLocation") {
