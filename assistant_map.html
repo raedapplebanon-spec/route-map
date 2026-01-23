@@ -309,26 +309,29 @@
     }
 
     // =========================================================
-    // ✅ 4. LOGIC HANDLER (Now with Session Memory)
+    // ✅ 4. LOGIC HANDLER (Hardened against Duplicates)
     // =========================================================
     function checkArrivalLogic(myLocObj) {
           if (window.orderedStopIds && window.orderedStopIds.length > 0) {
               let firstPendingIndex = -1;
+              
+              // 1. Find the first stop that has ANY student not yet alerted
               for (let i = 0; i < window.orderedStopIds.length; i++) {
                   const id = window.orderedStopIds[i];
-                  const markerObj = window.routeMarkers.find(m => m.items.some(item => item.id === id));
+                  const markerObj = window.routeMarkers.find(m => m.items.some(item => String(item.id) === String(id)));
                   
                   if (markerObj) {
                       const isPending = markerObj.items.some(s => 
                           (s.type === 'student' || s.type === 'employee') && 
                           s.status === 'pending' && 
                           !s.isExcluded &&
-                          !window.alertedStudentIds.has(s.id) 
+                          !window.alertedStudentIds.has(String(s.id)) // Force String Check
                       );
                       if (isPending) { firstPendingIndex = i; break; }
                   }
               }
 
+              // 2. Check distance for that stop (and next 4)
               if (firstPendingIndex !== -1) {
                   let batchIds = [];
                   let batchNames = [];
@@ -338,52 +341,50 @@
                       if (targetIndex >= window.orderedStopIds.length) break;
 
                       const targetId = window.orderedStopIds[targetIndex];
-                      const targetMarker = window.routeMarkers.find(m => m.items.some(item => item.id === targetId));
+                      const targetMarker = window.routeMarkers.find(m => m.items.some(item => String(item.id) === String(targetId)));
                       
                       if (targetMarker) {
                           const stopLoc = new google.maps.LatLng(targetMarker.lat, targetMarker.lng);
                           const distToStop = google.maps.geometry.spherical.computeDistanceBetween(myLocObj, stopLoc);
                           
                           if (distToStop < APPROACH_RADIUS) {
+                              // 🔥 CRITICAL FILTER: Only include students NOT in the Set
                               const activeItems = targetMarker.items.filter(s => 
                                   (s.type === 'student' || s.type === 'employee') && 
                                   s.status === 'pending' && 
                                   !s.isExcluded &&
-                                  !window.alertedStudentIds.has(s.id)
+                                  !window.alertedStudentIds.has(String(s.id))
                               );
                               
                               if (activeItems.length > 0) {
-                                  // 💾 MEMORY SAVE: Add to Set AND SessionStorage
-                                  activeItems.forEach(s => window.alertedStudentIds.add(s.id)); 
+                                  // 💾 MEMORY SAVE: Add to Set IMMEDIATELY
+                                  activeItems.forEach(s => window.alertedStudentIds.add(String(s.id))); 
                                   sessionStorage.setItem("alertedStudents", JSON.stringify(Array.from(window.alertedStudentIds)));
 
-                                  batchIds.push(...activeItems.map(i => i.id));
+                                  batchIds.push(...activeItems.map(i => String(i.id)));
                                   const namesAtThisStop = activeItems.map(s => s.name).join(" & ");
                                   batchNames.push(namesAtThisStop);
-                                  console.log("➕ Adding to batch: " + namesAtThisStop);
+                                  console.log("🔔 Triggering Alert for: " + namesAtThisStop);
                               }
                           } else {
-                              break; 
+                              break; // Stop looking further if the current stop is far
                           }
                       }
                   }
 
                   if (batchIds.length > 0) {
                       const finalNameString = batchNames.join(" + ");
-                      console.log("📤 Sending Sequential Batch: " + finalNameString);
+                      console.log("📤 Sending Batch to Flutter: " + finalNameString);
                       sendToFlutter({ action: 'stopApproaching', stopIds: batchIds, stopName: finalNameString });
                   }
               }
           }
 
+          // --- End of Route Arrival Logic ---
           if (currentRouteType === 'midday' && !hasLeftStartZone && startStopLocation) {
               const startLocObj = new google.maps.LatLng(startStopLocation.lat, startStopLocation.lng);
               const distFromStart = google.maps.geometry.spherical.computeDistanceBetween(myLocObj, startLocObj);
-              
-              if (distFromStart > 500) { 
-                  hasLeftStartZone = true;
-                  console.log("🔓 Bus has left the school zone. Arrival detection armed.");
-              }
+              if (distFromStart > 500) { hasLeftStartZone = true; }
           }
 
           if (!hasTriggeredArrival) { 
@@ -396,8 +397,7 @@
               }
               else if (currentRouteType === 'midday') {
                   if (endStopLocation) {
-                      targetLoc = endStopLocation; 
-                      triggerRadius = 300;
+                      targetLoc = endStopLocation; triggerRadius = 300;
                       if (!hasLeftStartZone) canTrigger = false; 
                   }
               }
@@ -416,7 +416,6 @@
                   
                   if (dist < triggerRadius) {
                       hasTriggeredArrival = true; 
-                      // 💾 MEMORY SAVE
                       sessionStorage.setItem("hasTriggeredArrival", "true");
                       console.log("🏁 Arrival Triggered!");
                       sendToFlutter({ action: 'arrivedAtEnd' });
@@ -424,7 +423,6 @@
               }
           }
     }
-
     // ✅ FIXED LISTENER: Now catches "updateDriverLocation"
     window.addEventListener("message", function (event) {
       if (!event.data) return;
@@ -449,32 +447,30 @@
 
     window.setRouteData = function(stops, shift, routeType) {
       // 🔒 LOCK RESET LOGIC with SESSION MEMORY
-      const newSignature = shift + "_" + routeType + "_" + (stops.length > 0 ? stops[0].id : "");
+      // Ensure we use String for ID to prevent mismatch
+      const firstId = (stops.length > 0 && stops[0].id) ? String(stops[0].id) : "";
+      const newSignature = shift + "_" + routeType + "_" + firstId;
       
-      // Check if this is the SAME route as stored in session
       const savedSignature = sessionStorage.getItem("routeSignature");
 
       if (newSignature !== savedSignature) {
-          console.log("🔄 New Route Detected. Resetting Locks & Storage.");
-          // Clear Everything
+          console.warn("🔄 New Route Signature Detected (" + newSignature + " vs " + savedSignature + "). Clearing Alerts.");
           window.alertedStudentIds.clear();
           hasTriggeredArrival = false; 
           hasLeftStartZone = false;
           
-          // Save new Signature
           lastRouteSignature = newSignature;
           sessionStorage.setItem("routeSignature", newSignature);
           sessionStorage.removeItem("alertedStudents");
           sessionStorage.removeItem("hasTriggeredArrival");
       } else {
-          console.log("💾 Same Route Detected. Restoring Session State.");
+          // console.log("💾 Same Route. Restoring Session.");
           lastRouteSignature = savedSignature;
           
-          // Restore Alerts
           const savedAlerts = JSON.parse(sessionStorage.getItem("alertedStudents") || "[]");
-          savedAlerts.forEach(id => window.alertedStudentIds.add(id));
+          // Ensure we restore as Strings
+          savedAlerts.forEach(id => window.alertedStudentIds.add(String(id)));
           
-          // Restore Arrival Trigger
           hasTriggeredArrival = sessionStorage.getItem("hasTriggeredArrival") === "true";
       }
 
@@ -508,7 +504,8 @@
           const marker = new google.maps.marker.AdvancedMarkerElement({ map: map, position: { lat: cluster.lat, lng: cluster.lng }, content: pin.element });
           marker.addListener("click", () => { infoWindow.setContent(html); infoWindow.open(map, marker); });
           
-          const isAlreadyTriggered = cluster.items.some(s => window.alertedStudentIds.has(s.id));
+          // Check Set using String ID
+          const isAlreadyTriggered = cluster.items.some(s => window.alertedStudentIds.has(String(s.id)));
           
           window.routeMarkers.push({
               marker, pin, names: cluster.items.map(i => i.name || ""), html, lat: cluster.lat, lng: cluster.lng,
@@ -518,7 +515,7 @@
 
       let validStopCounter = 0; 
 
-      // 2. RE-DRAW MARKERS (Colors update automatically here)
+      // 2. RE-DRAW MARKERS
       clusters.forEach((cluster) => {
           const pos = { lat: cluster.lat, lng: cluster.lng };
           bounds.extend(pos);
@@ -543,7 +540,6 @@
               color = "#9C27B0"; text = "A"; header = "المرافق"; 
           }
           else {
-              // Students OR Employees
               validStopCounter++; 
               text = validStopCounter.toString();
               const activeItems = cluster.items.filter(s => (s.type === 'student' || s.type === 'employee') && !s.isExcluded);
@@ -572,7 +568,6 @@
       // 3. DECIDE: API vs FREE
       if (clusters.length >= 2) {
           if (isStructureChanged) {
-              // 🔥 OFFLINE PROTECTION 🔥
               if (navigator.onLine === false) {
                     console.log("⚠️ Offline detected. Skipping API. Using Linear Order.");
                     calculateFallbackRoute(clusters);
@@ -616,8 +611,8 @@
         });
     }
 
+
     // 🛡️ OFFLINE FALLBACK ROUTER
-    // 🛡️ OFFLINE FALLBACK ROUTER (Updated with Sort)
     function calculateFallbackRoute(clusters) {
        let orderedIds = [];
        const startPoint = clusters.find(c => c.isStart);
