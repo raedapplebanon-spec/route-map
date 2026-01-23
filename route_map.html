@@ -1,29 +1,3 @@
-This is the final piece of the puzzle. I have modified your HTML/JS to implement the **Hybrid Logic** and the **Return Trip**.
-
-Here are the specific changes I made to achieve your goals:
-
-1. **The "Switch" (`calculateRoadRoute`):**
-* If `optimizerEnabled == true`: I let Google Shuffle the stops.
-* If `optimizerEnabled == false`: I **sort** the stops based on the `stopOrder` you sent from Dart before drawing the line.
-
-
-2. **The "Return Trip" (`sendOrdersToFlutter`):**
-* After the route is drawn, I loop through the stops.
-* I ignore the School/Driver/Assistant (Anchors).
-* I assign `Order: 1` to the first passenger stop, `Order: 2` to the next.
-* I send the `locationId` + `newOrder` back to Dart.
-
-
-3. **Data Preservation:**
-* Updated `groupCloseLocations` to ensure `locationId` is kept inside the cluster so we can send it back.
-
-
-
-### The Complete, Modified HTML Code
-
-Replace your entire `route_map.html` content with this.
-
-```html
 <!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
@@ -418,5 +392,3 @@ Replace your entire `route_map.html` content with this.
   </script>
 </body>
 </html>
-
-```
