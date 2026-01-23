@@ -136,7 +136,9 @@
         }
       });
       return clusters;
-    }    function updateRouteSummary(km, minutes) {
+    }   
+    
+    function updateRouteSummary(km, minutes) {
       const summaryBox = document.getElementById("route-summary");
       const summaryText = document.getElementById("summary-text");
       if (summaryBox && summaryText) {
@@ -640,8 +642,7 @@
        const endPoint = clusters.find(c => c.isEnd);
        if (!startPoint || !endPoint) return;
 
-       // 1. Separate Middle Stops (Students/Employees/Assistants)
-       // We exclude Start/End because they are the anchors
+       // 1. Separate Middle Stops
        let middleStops = clusters.filter(c => c !== startPoint && c !== endPoint && !c.isExcluded);
 
        // 2. 🔥 STRICT SORTING: Sort based on the Admin's order
@@ -651,7 +652,7 @@
            return orderA - orderB;
        });
 
-       // 3. Create Waypoints in strict order
+       // 3. Create Waypoints
        let waypoints = middleStops.map(s => ({ 
            location: {lat: s.lat, lng: s.lng}, 
            stopover: true 
@@ -667,14 +668,14 @@
            if (status === "OK") {
                directionsRenderer.setDirections(result);
                
-               // 4. Manual Sequencing (Since we know the order is 1->2->3)
+               // 4. 🔥 MANUAL SEQUENCING (Ignore Google's indices, use our sorted list)
                let orderedIds = [];
                let visualCounter = 1;
 
                // A. Add Start IDs
                startPoint.items.forEach(i => orderedIds.push(i.id));
 
-               // B. Add Middle IDs (Sorted)
+               // B. Add Middle IDs (Iterate our sorted list directly)
                middleStops.forEach(cluster => {
                    cluster.items.forEach(item => orderedIds.push(item.id));
 
@@ -685,7 +686,6 @@
                    );
 
                    if (markerObj && markerObj.pin) {
-                       // Only number students/employees (Assistant gets 'A')
                        if (cluster.stopType !== 'assistant') {
                            markerObj.pin.glyphText = visualCounter.toString();
                            visualCounter++;
