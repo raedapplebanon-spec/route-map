@@ -98,6 +98,11 @@
       const clusters = [];
       stops.forEach(stop => {
         let placed = false;
+        
+        // 🔥 CAPTURE ORDER
+        const rawOrder = (stop.stopOrder !== undefined) ? stop.stopOrder : stop.stop_order;
+        const stopOrderVal = (rawOrder !== undefined && rawOrder !== null) ? parseInt(rawOrder) : 0;
+
         for (const c of clusters) {
           const d = haversineDistance(c.lat, c.lng, parseFloat(stop.lat), parseFloat(stop.lng));
           if (d < tolerance) {
@@ -106,6 +111,12 @@
             if (stop.isEnd) c.isEnd = true;
             if (stop.type === 'assistant') c.stopType = 'assistant';
             if (!stop.isExcluded) c.isExcluded = false;
+            
+            // 🔥 KEEP LOWEST ORDER
+            if (stopOrderVal > 0) {
+                 if (!c.minOrder || stopOrderVal < c.minOrder) c.minOrder = stopOrderVal;
+            }
+
             placed = true;
             break;
           }
@@ -118,13 +129,14 @@
             isStart: stop.isStart === true,
             isEnd: stop.isEnd === true,
             stopType: stop.type,
-            isExcluded: stop.isExcluded === true
+            isExcluded: stop.isExcluded === true,
+            // 🔥 SAVE ORDER
+            minOrder: (stopOrderVal > 0) ? stopOrderVal : 9999
           });
         }
       });
       return clusters;
     }
-
     function updateRouteSummary(km, minutes) {
       const summaryBox = document.getElementById("route-summary");
       const summaryText = document.getElementById("summary-text");
