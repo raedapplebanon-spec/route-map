@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+  <title>Live Route Tracking</title>
+  
+  <style>
+    /* 1. BASIC RESET & FULLSCREEN */
+    html, body { height: 100%; margin: 0; padding: 0; overflow: hidden; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #f0f2f5; }
+    #map { height: 100%; width: 100%; }
+
+    /* 2. FLOATING LEGEND BOX */
+    .legend {
+        display: none; /* Hidden until map loads */
+        position: absolute;
+        bottom: 25px;
+        right: 10px;
+        background: rgba(255, 255, 255, 0.95);
+        padding: 12px 16px;
+        border-radius: 12px;
+        font-size: 12px;
+        box-shadow: 0 4px 15px rgba(0,0,0,0.15);
+        z-index: 999;
+        direction: rtl;
+        min-width: 140px;
+        border: 1px solid #eee;
+    }
+    .legend-row { display: flex; align-items: center; margin-bottom: 8px; }
+    .legend-row:last-child { margin-bottom: 0; }
+    .legend-color { width: 16px; height: 16px; border-radius: 4px; margin-left: 8px; box-shadow: inset 0 0 2px rgba(0,0,0,0.2); }
+    
+    /* 3. MARKER INFO WINDOW STYLES */
+    .gm-style-iw { padding: 0 !important; overflow: hidden !important; border-radius: 8px !important; }
+    .gm-style-iw-d { overflow: hidden !important; max-height: none !important; }
+    .gm-ui-hover-effect { top: 4px !important; right: 4px !important; background: rgba(255,255,255,0.8) !important; border-radius: 50%; }
+    
+    /* 4. STATUS BADGES (Used inside Info Windows) */
+    .status-badge { font-size: 11px; padding: 2px 6px; border-radius: 4px; color: white; display: inline-block; margin-left: 5px; }
+    .bg-red { background-color: #d32f2f; } /* Pending */
+    .bg-green { background-color: #388e3c; } /* Completed */
+    .bg-blue { background-color: #1976D2; } /* Info */
+    .bg-gray { background-color: #757575; } /* Excluded */
+  </style>
+
+  <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCYaJ4Gjq36mq8swYgjNXOYr5mKZi45niA&callback=initMap&libraries=marker,geometry&loading=async&v=weekly" async defer></script>
+</head>
+
+<body>
+  <div id="map"></div>
+
+  <div id="legend" class="legend">
+    <div class="legend-row"><div class="legend-color" style="background:#00c853"></div><span>نقطة البداية (S)</span></div>
+    <div class="legend-row"><div class="legend-color" style="background:#d50000"></div><span>نقطة النهاية (E)</span></div>
+    <div class="legend-row"><div class="legend-color" style="background:#1a73e8"></div><span>نقطة توقف (قيد الانتظار)</span></div>
+    <div class="legend-row"><div class="legend-color" style="background:#388e3c"></div><span>نقطة توقف (مكتملة)</span></div>
+    <div class="legend-row"><div class="legend-color" style="background:#9C27B0"></div><span>المرافق (A)</span></div>
+    <div class="legend-row"><div class="legend-color" style="background:#757575"></div><span>مستبعد (X)</span></div>
+  </div>
+
+  <script>
+    // =========================================================
+    // 1. GLOBALS & CONFIG
+    // =========================================================
+    let map, directionsService, directionsRenderer, infoWindow;
+    let routeMarkers = [];
+    let busMarker = null;
+    let mapReady = false;
+
+    // Animation Globals
+    let animationFrameId = null;
+    let animationStartTime = 0;
+    const ANIMATION_DURATION = 1000; // 1 second slide
+
+    // Config used for Advanced Markers
+    const MY_MAP_ID = "48c2bb983bd19c1c44d95cb7"; 
+    const BUS_ICON_URL = "https://raedapplebanon-spec.github.io/route-map/school-bus_6122028.png";
+
+    // =========================================================
+    // 2. INITIALIZE MAP
+    // =========================================================
+    window.initMap = async function() {
+      try {
+        const { Map } = await google.maps.importLibrary("maps");
+        const { AdvancedMarkerElement, PinElement } = await google.maps.importLibrary("marker");
+
+        map = new Map(document.getElementById("map"), {
+          center: { lat: 31.9522, lng: 35.2332 }, // Default center (Amman)
+          zoom: 12,
+          mapId: MY_MAP_ID,
+          mapTypeControl: false,
+          streetViewControl: false,
+          fullscreenControl: false,
+          zoomControlOptions: { position: google.maps.ControlPosition.RIGHT_TOP }
+        });
+
+        // Add legend to map
+        map.controls[google.maps.ControlPosition.RIGHT_BOTTOM].push(document.getElementById("legend"));
+
+        infoWindow = new google.maps.InfoWindow();
+        directionsService = new google.maps.DirectionsService();
+        directionsRenderer = new google.maps.DirectionsRenderer({
+            map: map,
+            suppressMarkers: true, // We draw our own cool markers
+            preserveViewport: true,
+            polylineOptions: { strokeColor: "#1a73e8", strokeOpacity: 0.8, strokeWeight: 5 }
+        });
+
+        google.maps.event.addListenerOnce(map, 'tilesloaded', () => {
+            document.getElementById("legend").style.display = "block";
+            mapReady = true;
+            sendToFlutter("mapIsReady"); // Signal Flutter we are live
+        });
+
+      } catch (e) {
+        console.error("❌ Map Init Failed:", e);
+      }
+    };
+
+    // =========================================================
+    // 3. MESSAGE LISTENER (The Brain)
+    // =========================================================
+    window.addEventListener("message", function (event) {
+        if (!event.data) return;
+        let data = event.data;
+        if (typeof data === 'string') { try { data = JSON.parse(data); } catch(e){} }
+
+        // ACTION A: DRAW ROUTE STOPS & LINE
+        if (data.action === "setRouteData" && mapReady) {
+            const routePoints = (data.routesGrouped && data.routesGrouped.length > 0) 
+                              ? data.routesGrouped[0].points 
+                              : [];
+            renderRouteOnMap(routePoints);
+        }
+
+        // ACTION B: UPDATE LIVE BUS POSITION
+        if (data.action === "updateBusLocation" && mapReady) {
+            moveBusMarker(parseFloat(data.lat), parseFloat(data.lng));
+        }
+    });
+
+    // =========================================================
+    // 4. ROUTE RENDERING LOGIC (Strict Order + Excluded Split)
+    // =========================================================
+    function renderRouteOnMap(points) {
+        if (!points || points.length === 0) return;
+
+        // A. Cleanup Old Route
+        routeMarkers.forEach(m => m.map = null);
+        routeMarkers = [];
+        directionsRenderer.setDirections({ routes: [] });
+
+        // B. Identify Anchors
+        const startPoint = points.find(p => p.isStart);
+        const endPoint = points.find(p => p.isFinal);
+        
+        // C. Grouping (Cluster close points)
+        const clusters = groupCloseLocations(points);
+        const startCluster = clusters.find(c => c.isStart);
+        const endCluster = clusters.find(c => c.isEnd);
+        
+        if (!startCluster || !endCluster) {
+            console.warn("⚠️ Missing start or end point for route rendering.");
+            drawAllPins(clusters); // Fallback: just draw pins without line
+            return;
+        }
+
+        // D. Sorting & Splitting
+        // 1. Get ALL Middle Stops (for correct numbering 1,2,3,4...)
+        let allMiddleStops = clusters.filter(c => c !== startCluster && c !== endCluster);
+        
+        // 2. 🔥 STRICT SORT BY ADMIN ORDER 🔥
+        allMiddleStops.sort((a, b) => (a.minOrder || 9999) - (b.minOrder || 9999));
+
+        // 3. Filter ACTIVE Waypoints for Google's Blue Line (Skip Excluded)
+        let activeWaypoints = allMiddleStops
+            .filter(c => !c.isExcluded)
+            .map(c => ({ location: {lat: c.lat, lng: c.lng}, stopover: true }));
+
+        // E. Draw All Pins (Visual Counter includes gray/excluded stops)
+        let visualCounter = 1;
+        const finalOrderedList = [startCluster, ...allMiddleStops, endCluster];
+
+        finalOrderedList.forEach(cluster => {
+            let color = "#1a73e8"; let text = ""; let header = "نقطة تجمع";
+            
+            if (cluster.isStart) { color = "#00c853"; text = "S"; header = "نقطة البداية"; }
+            else if (cluster.isEnd) { color = "#d50000"; text = "E"; header = "نقطة النهاية"; }
+            else if (cluster.stopType === 'assistant') { color = "#9C27B0"; text = "A"; header = "المرافق"; }
+            else {
+                // Students/Employees
+                text = visualCounter.toString();
+                visualCounter++;
+                if (cluster.isExcluded) {
+                    color = "#757575"; // Gray for excluded
+                } else {
+                    // Check if any student here is pending
+                    const anyPending = cluster.items.some(s => s.status === 'pending' || !s.status);
+                    color = anyPending ? "#d32f2f" : "#388e3c"; // Red if pending, Green if done
+                }
+            }
+
+            createAdvancedMarker(cluster, color, text, header);
+        });
+
+        // F. Draw the Blue Route Line (Skips Excluded)
+        if (activeWaypoints.length > 0 || (startCluster && endCluster)) {
+            directionsService.route({
+                origin: { lat: startCluster.lat, lng: startCluster.lng },
+                destination: { lat: endCluster.lat, lng: endCluster.lng },
+                waypoints: activeWaypoints,
+                travelMode: google.maps.TravelMode.DRIVING,
+                optimizeWaypoints: false // 🔥 CRITICAL: Trust our sorted order
+            }, (result, status) => {
+                if (status === "OK") {
+                    directionsRenderer.setDirections(result);
+                    fitBoundsToRoute(result);
+                } else {
+                    console.error("Directions API failed:", status);
+                    // Fit bounds to pins as fallback
+                    const bounds = new google.maps.LatLngBounds();
+                    clusters.forEach(c => bounds.extend({lat: c.lat, lng: c.lng}));
+                    map.fitBounds(bounds);
+                }
+            });
+        }
+    }
+
+    // =========================================================
+    // 5. LIVE BUS ANIMATION LOGIC (Smooth Sliding)
+    // =========================================================
+    function moveBusMarker(lat, lng) {
+        if (!lat || !lng) return;
+        const newPos = new google.maps.LatLng(lat, lng);
+
+        // Case 1: First Time - Create Instantly
+        if (!busMarker) {
+            busMarker = new google.maps.Marker({
+                map: map,
+                position: newPos,
+                icon: { 
+                    url: BUS_ICON_URL, 
+                    scaledSize: new google.maps.Size(45, 45), 
+                    anchor: new google.maps.Point(22.5, 22.5) 
+                },
+                zIndex: 9999, // Always on top
+                optimized: false // Better for frequent movement
+            });
+            return;
+        }
+
+        // Case 2: Update - Animate Smoothly
+        if (animationFrameId) cancelAnimationFrame(animationFrameId);
+        animateMarker(busMarker.getPosition(), newPos);
+    }
+
+    function animateMarker(startLatLng, targetLatLng) {
+        animationStartTime = Date.now();
+        function step() {
+            const elapsed = Date.now() - animationStartTime;
+            const progress = Math.min(elapsed / ANIMATION_DURATION, 1); // 0.0 -> 1.0
+
+            const currentLat = startLatLng.lat() + (targetLatLng.lat() - startLatLng.lat()) * progress;
+            const currentLng = startLatLng.lng() + (targetLatLng.lng() - startLatLng.lng()) * progress;
+            busMarker.setPosition(new google.maps.LatLng(currentLat, currentLng));
+
+            if (progress < 1) {
+                animationFrameId = requestAnimationFrame(step);
+            }
+        }
+        step();
+    }
+
+    // =========================================================
+    // 6. HELPER FUNCTIONS
+    // =========================================================
+    
+    // Helper to create the modern Google Pin
+    async function createAdvancedMarker(cluster, color, text, headerHtml) {
+        const { AdvancedMarkerElement, PinElement } = await google.maps.importLibrary("marker");
+        
+        const pin = new PinElement({
+            background: color,
+            borderColor: "#FFFFFF",
+            glyphColor: "#FFFFFF",
+            glyphText: text,
+            scale: 1.1
+        });
+
+        const marker = new AdvancedMarkerElement({
+            map: map,
+            position: { lat: cluster.lat, lng: cluster.lng },
+            content: pin.element
+        });
+
+        // Build InfoWindow Content based on students in cluster
+        let rows = cluster.items.map(s => {
+            if (s.isStart || s.isFinal) return `<div style="padding:4px 0;">${s.studentName || 'نقطة'}</div>`;
+            if (s.stopType === 'assistant') return `<div style="padding:4px 0; font-weight:bold;">المرافق</div>`;
+            
+            let badge = 'bg-red'; let statusTxt = 'قيد الانتظار';
+            if (s.isAvailable === true) { badge = 'bg-green'; statusTxt = 'مكتمل'; } // Using isAvailable as proxy for status if needed
+            // Check for explicit status strings if your flutter app sends them
+            if (s.status === 'picked' || s.status === 'dropped') { badge = 'bg-green'; statusTxt = 'مكتمل'; }
+
+            let details = s.gradeName || '';
+            return `<div style="border-bottom:1px solid #eee; padding: 6px 0;">
+                      <span class="status-badge ${badge}">${statusTxt}</span>
+                      <b style="margin-right:5px;">${s.studentName}</b>
+                      <br><span style="font-size:11px; color:#666; margin-right: 55px;">${details}</span>
+                    </div>`;
+        }).join('');
+
+        const contentString = `<div style="direction:rtl; text-align:right; padding:5px; min-width:200px;">
+                                 <h3 style="margin:0 0 8px 0; color:${color}; border-bottom:2px solid ${color}; padding-bottom:4px;">${headerHtml}</h3>
+                                 ${rows}
+                               </div>`;
+
+        marker.addListener("click", () => {
+            infoWindow.setContent(contentString);
+            infoWindow.open(map, marker);
+        });
+
+        routeMarkers.push(marker);
+    }
+
+    // Helper to group nearby stops (e.g., siblings at same house)
+    function groupCloseLocations(points) {
+      const clusters = [];
+      points.forEach(p => {
+        if(p.hideMarker) return; // Skip if explicitly hidden
+        let placed = false;
+        for(const c of clusters) {
+           // 15 meter tolerance
+           if(haversineDistance(c.lat, c.lng, p.lat, p.lng) < 15) {
+             c.items.push(p);
+             if(p.isStart) c.isStart = true;
+             if(p.isFinal) c.isEnd = true;
+             if(p.stopType === 'assistant') c.stopType = 'assistant';
+             // Determine lowest order for sorting
+             if(p.stop_order > 0 && p.stop_order < c.minOrder) c.minOrder = p.stop_order;
+             placed = true; break;
+           }
+        }
+        if(!placed) {
+           clusters.push({
+             lat: p.lat, lng: p.lng, items: [p],
+             isStart: p.isStart, isEnd: p.isFinal,
+             stopType: p.stopType,
+             minOrder: (p.stop_order > 0 ? p.stop_order : 9999),
+             // Cluster is excluded only if ALL items in it are supposed to be excluded/hidden
+             isExcluded: false // Default to false, logic can be adjusted if Flutter sends explicit exclusion
+           });
+        }
+      });
+      return clusters;
+    }
+
+    // Math helper for distance
+    function haversineDistance(lat1, lng1, lat2, lng2) {
+      const R = 6371e3; 
+      const toRad = x => x * Math.PI / 180;
+      const dLat = toRad(lat2 - lat1); var dLng = toRad(lng2 - lng1);
+      const a = Math.sin(dLat/2)**2 + Math.cos(toRad(lat1))*Math.cos(toRad(lat2))*Math.sin(dLng/2)**2;
+      return 2 * R * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    }
+
+    // Helper to zoom map to fit route and bus
+    function fitBoundsToRoute(directionsResult) {
+        const bounds = new google.maps.LatLngBounds();
+        // Add route path bounds
+        bounds.union(directionsResult.routes[0].bounds);
+        // Ensure bus is visible if it exists
+        if (busMarker) bounds.extend(busMarker.getPosition());
+        map.fitBounds(bounds);
+    }
+    
+    // Helper for communication back to Flutter (if needed)
+    function sendToFlutter(payload) {
+      const msg = typeof payload === 'string' ? payload : JSON.stringify(payload);
+      if (window.FlutterChan) window.FlutterChan.postMessage(msg);
+      else window.parent.postMessage(msg, "*");
+    }
+
+    // Fallback for pins-only rendering
+    function drawAllPins(clusters) {
+         // Simple fallback loop just to show markers if routing fails
+         clusters.forEach(c => {
+             let color = c.isStart ? "#00c853" : (c.isEnd ? "#d50000" : "#1a73e8");
+             createAdvancedMarker(c, color, "", "نقطة");
+         });
+         const bounds = new google.maps.LatLngBounds();
+         clusters.forEach(c => bounds.extend({lat:c.lat, lng:c.lng}));
+         map.fitBounds(bounds);
+    }
+  </script>
+</body>
+</html>
