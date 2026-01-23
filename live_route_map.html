@@ -6,40 +6,29 @@
   <title>Live Route Tracking</title>
   
   <style>
-    /* 1. BASIC RESET & FULLSCREEN */
+    /* 1. BASIC RESET */
     html, body { height: 100%; margin: 0; padding: 0; overflow: hidden; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #f0f2f5; }
     #map { height: 100%; width: 100%; }
 
-    /* 2. FLOATING LEGEND BOX */
+    /* 2. LEGEND */
     .legend {
-        display: none; /* Hidden until map loads */
-        position: absolute;
-        bottom: 25px;
-        right: 10px;
+        display: none;
+        position: absolute; bottom: 25px; right: 10px;
         background: rgba(255, 255, 255, 0.95);
-        padding: 12px 16px;
-        border-radius: 12px;
-        font-size: 12px;
-        box-shadow: 0 4px 15px rgba(0,0,0,0.15);
-        z-index: 999;
-        direction: rtl;
-        min-width: 140px;
-        border: 1px solid #eee;
+        padding: 12px 16px; border-radius: 12px;
+        font-size: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.15);
+        z-index: 999; direction: rtl; min-width: 140px; border: 1px solid #eee;
     }
     .legend-row { display: flex; align-items: center; margin-bottom: 8px; }
     .legend-row:last-child { margin-bottom: 0; }
     .legend-color { width: 16px; height: 16px; border-radius: 4px; margin-left: 8px; box-shadow: inset 0 0 2px rgba(0,0,0,0.2); }
     
-    /* 3. MARKER INFO WINDOW STYLES */
+    /* 3. MARKER STYLES */
+    .bus-marker-container { pointer-events: none; }
     .gm-style-iw { padding: 0 !important; overflow: hidden !important; border-radius: 8px !important; }
-    .gm-style-iw-d { overflow: hidden !important; max-height: none !important; }
-    .gm-ui-hover-effect { top: 4px !important; right: 4px !important; background: rgba(255,255,255,0.8) !important; border-radius: 50%; }
-    
-    /* 4. STATUS BADGES */
     .status-badge { font-size: 11px; padding: 2px 6px; border-radius: 4px; color: white; display: inline-block; margin-left: 5px; }
     .bg-red { background-color: #d32f2f; }
     .bg-green { background-color: #388e3c; }
-    .bg-blue { background-color: #1976D2; }
     .bg-gray { background-color: #757575; }
   </style>
 
@@ -52,28 +41,25 @@
   <div id="legend" class="legend">
     <div class="legend-row"><div class="legend-color" style="background:#00c853"></div><span>نقطة البداية (S)</span></div>
     <div class="legend-row"><div class="legend-color" style="background:#d50000"></div><span>نقطة النهاية (E)</span></div>
-    <div class="legend-row"><div class="legend-color" style="background:#1a73e8"></div><span>نقطة توقف (قيد الانتظار)</span></div>
-    <div class="legend-row"><div class="legend-color" style="background:#388e3c"></div><span>نقطة توقف (مكتملة)</span></div>
-    <div class="legend-row"><div class="legend-color" style="background:#9C27B0"></div><span>المرافق (A)</span></div>
-    <div class="legend-row"><div class="legend-color" style="background:#757575"></div><span>مستبعد (X)</span></div>
+    <div class="legend-row"><div class="legend-color" style="background:#1a73e8"></div><span>نقطة توقف</span></div>
+    <div class="legend-row"><div class="legend-color" style="background:#FBBC04"></div><span>الحافلة (Live)</span></div>
   </div>
 
   <script>
     // =========================================================
-    // 1. GLOBALS & CONFIG
+    // 1. GLOBALS
     // =========================================================
     let map, directionsService, directionsRenderer, infoWindow;
     let routeMarkers = [];
     let busMarker = null;
     let mapReady = false;
+    
+    // Libraries
+    let AdvancedMarkerElement, PinElement;
 
     // Animation Globals
     let animationFrameId = null;
-    let animationStartTime = 0;
-    const ANIMATION_DURATION = 1000; // 1 second slide
-
     const MY_MAP_ID = "48c2bb983bd19c1c44d95cb7"; 
-    const BUS_ICON_URL = "https://raedapplebanon-spec.github.io/route-map/school-bus_6122028.png";
 
     // =========================================================
     // 2. INITIALIZE MAP
@@ -81,8 +67,9 @@
     window.initMap = async function() {
       try {
         const { Map } = await google.maps.importLibrary("maps");
-        // We import these early to ensure they are available
-        await google.maps.importLibrary("marker");
+        const markerLib = await google.maps.importLibrary("marker");
+        AdvancedMarkerElement = markerLib.AdvancedMarkerElement;
+        PinElement = markerLib.PinElement;
 
         map = new Map(document.getElementById("map"), {
           center: { lat: 31.9522, lng: 35.2332 }, 
@@ -94,50 +81,116 @@
           zoomControlOptions: { position: google.maps.ControlPosition.RIGHT_TOP }
         });
 
+        // Setup UI
         map.controls[google.maps.ControlPosition.RIGHT_BOTTOM].push(document.getElementById("legend"));
-
         infoWindow = new google.maps.InfoWindow();
         directionsService = new google.maps.DirectionsService();
         directionsRenderer = new google.maps.DirectionsRenderer({
-            map: map,
-            suppressMarkers: true,
-            preserveViewport: true,
+            map: map, suppressMarkers: true, preserveViewport: true,
             polylineOptions: { strokeColor: "#1a73e8", strokeOpacity: 0.8, strokeWeight: 5 }
         });
 
+        // Signal Ready
         google.maps.event.addListenerOnce(map, 'tilesloaded', () => {
             document.getElementById("legend").style.display = "block";
             mapReady = true;
             sendToFlutter("mapIsReady"); 
         });
 
-      } catch (e) {
-        console.error("❌ Map Init Failed:", e);
-      }
+      } catch (e) { console.error("❌ Map Init Failed:", e); }
     };
 
     // =========================================================
-    // 3. MESSAGE LISTENER
+    // 3. BRIDGE (CRITICAL FOR MOBILE)
+    // =========================================================
+    window.handleDirectUpdate = function(lat, lng) {
+        updateBusUI({ lat: lat, lng: lng });
+    };
+
+    // =========================================================
+    // 4. MESSAGE LISTENER
     // =========================================================
     window.addEventListener("message", function (event) {
         if (!event.data) return;
         let data = event.data;
         if (typeof data === 'string') { try { data = JSON.parse(data); } catch(e){} }
 
+        // ROUTE DATA
         if (data.action === "setRouteData" && mapReady) {
             const routePoints = (data.routesGrouped && data.routesGrouped.length > 0) 
-                              ? data.routesGrouped[0].points 
-                              : [];
+                              ? data.routesGrouped[0].points : [];
             renderRouteOnMap(routePoints);
         }
 
+        // BUS DATA
         if (data.action === "updateBusLocation" && mapReady) {
-            moveBusMarker(parseFloat(data.lat), parseFloat(data.lng));
+            updateBusUI(data);
         }
     });
 
     // =========================================================
-    // 4. ROUTE RENDERING LOGIC
+    // 5. 🔥 PARENT-STYLE BUS LOGIC 🔥
+    // =========================================================
+    function updateBusUI(data) {
+        if (!mapReady) return;
+        
+        const lat = parseFloat(data.lat);
+        const lng = parseFloat(data.lng);
+        if (isNaN(lat) || isNaN(lng)) return;
+        
+        const busPos = { lat, lng };
+
+        if (!busMarker) {
+            // Create New (Yellow Bus Pin)
+            const busPin = new PinElement({ background: "#FBBC04", glyphText: "🚌", borderColor: "#fff" });
+            const container = document.createElement('div');
+            container.className = 'bus-marker-container';
+            container.appendChild(busPin.element);
+
+            busMarker = new AdvancedMarkerElement({
+                map: map,
+                position: busPos,
+                content: container,
+                zIndex: 1000,
+                title: "Live Bus"
+            });
+        } else {
+            // Animate Existing
+            animateMarker(busMarker, lat, lng);
+        }
+    }
+
+    // Exact copy of Parent Map Animation
+    function animateMarker(marker, targetLat, targetLng) {
+        const startPos = marker.position;
+        const startLat = (typeof startPos.lat === 'function') ? startPos.lat() : startPos.lat;
+        const startLng = (typeof startPos.lng === 'function') ? startPos.lng() : startPos.lng;
+
+        const startTime = performance.now();
+        const duration = 2000; // 2 seconds
+
+        if (animationFrameId) cancelAnimationFrame(animationFrameId);
+
+        function step(currentTime) {
+            const elapsed = currentTime - startTime;
+            const progress = Math.min(elapsed / duration, 1);
+            
+            const currentLat = startLat + (targetLat - startLat) * progress;
+            const currentLng = startLng + (targetLng - startLng) * progress;
+
+            marker.position = { lat: currentLat, lng: currentLng };
+
+            if (progress < 1) {
+                animationFrameId = requestAnimationFrame(step);
+            } else {
+                animationFrameId = null;
+            }
+        }
+        animationFrameId = requestAnimationFrame(step);
+    }
+
+    // =========================================================
+    // 6. ROUTE RENDERING (YOUR CUSTOM LOGIC)
     // =========================================================
     function renderRouteOnMap(points) {
         if (!points || points.length === 0) return;
@@ -148,19 +201,17 @@
 
         const startPoint = points.find(p => p.isStart);
         const endPoint = points.find(p => p.isFinal);
-        
         const clusters = groupCloseLocations(points);
         const startCluster = clusters.find(c => c.isStart);
         const endCluster = clusters.find(c => c.isEnd);
-        
+
         if (!startCluster || !endCluster) {
-            drawAllPins(clusters);
-            return;
+            drawAllPins(clusters); return;
         }
 
         let allMiddleStops = clusters.filter(c => c !== startCluster && c !== endCluster);
         allMiddleStops.sort((a, b) => (a.minOrder || 9999) - (b.minOrder || 9999));
-
+        
         let activeWaypoints = allMiddleStops
             .filter(c => !c.isExcluded)
             .map(c => ({ location: {lat: c.lat, lng: c.lng}, stopover: true }));
@@ -177,12 +228,7 @@
             else {
                 text = visualCounter.toString();
                 visualCounter++;
-                if (cluster.isExcluded) {
-                    color = "#757575";
-                } else {
-                    const anyPending = cluster.items.some(s => s.status === 'pending' || !s.status);
-                    color = anyPending ? "#d32f2f" : "#388e3c";
-                }
+                color = cluster.isExcluded ? "#757575" : "#1a73e8";
             }
             createAdvancedMarker(cluster, color, text, header);
         });
@@ -197,10 +243,9 @@
             }, (result, status) => {
                 if (status === "OK") {
                     directionsRenderer.setDirections(result);
-                    fitBoundsToRoute(result);
-                } else {
+                    // Only fit bounds initially
                     const bounds = new google.maps.LatLngBounds();
-                    clusters.forEach(c => bounds.extend({lat: c.lat, lng: c.lng}));
+                    bounds.union(result.routes[0].bounds);
                     map.fitBounds(bounds);
                 }
             });
@@ -208,112 +253,24 @@
     }
 
     // =========================================================
-    // 5. 🔥 MODERN LIVE BUS ANIMATION LOGIC (FIXED) 🔥
+    // 7. HELPER FUNCTIONS
     // =========================================================
-    async function moveBusMarker(lat, lng) {
-        if (!lat || !lng) return;
-        const { AdvancedMarkerElement } = await google.maps.importLibrary("marker");
-        const newPos = { lat: lat, lng: lng };
-
-        // 1. Create Instantly if missing
-        if (!busMarker) {
-            // Create DOM Element for Icon (Required for Advanced Markers)
-            const busIconImg = document.createElement("img");
-            busIconImg.src = BUS_ICON_URL;
-            busIconImg.style.width = "45px";
-            busIconImg.style.height = "45px";
-            busIconImg.style.display = "block"; // Prevent layout shifts
-
-            busMarker = new AdvancedMarkerElement({
-                map: map,
-                position: newPos,
-                content: busIconImg, // Use DOM element
-                zIndex: 999999,      // Ensure it's on top
-                title: "School Bus"
-            });
-            return;
-        }
-
-        // 2. Animate if exists
-        if (animationFrameId) cancelAnimationFrame(animationFrameId);
-        
-        // Handle AdvancedMarker position (it can be an object or LatLng)
-        let startLat = busMarker.position.lat;
-        let startLng = busMarker.position.lng;
-        // Unwrap if it's a function (unlikely in AdvancedMarker but good for safety)
-        if (typeof startLat === 'function') startLat = startLat();
-        if (typeof startLng === 'function') startLng = startLng();
-
-        animateMarker(startLat, startLng, lat, lng);
-    }
-
-    function animateMarker(sLat, sLng, eLat, eLng) {
-        animationStartTime = Date.now();
-        function step() {
-            const elapsed = Date.now() - animationStartTime;
-            const progress = Math.min(elapsed / ANIMATION_DURATION, 1);
-
-            const currentLat = sLat + (eLat - sLat) * progress;
-            const currentLng = sLng + (eLng - sLng) * progress;
-            
-            // Set position directly (Advanced Markers use properties, not setters)
-            if (busMarker) {
-                busMarker.position = { lat: currentLat, lng: currentLng };
-            }
-
-            if (progress < 1) {
-                animationFrameId = requestAnimationFrame(step);
-            }
-        }
-        step();
-    }
-
-    // =========================================================
-    // 6. HELPER FUNCTIONS
-    // =========================================================
-    
     async function createAdvancedMarker(cluster, color, text, headerHtml) {
-        const { AdvancedMarkerElement, PinElement } = await google.maps.importLibrary("marker");
-        
-        const pin = new PinElement({
-            background: color,
-            borderColor: "#FFFFFF",
-            glyphColor: "#FFFFFF",
-            glyphText: text,
-            scale: 1.1
-        });
-
+        const pin = new PinElement({ background: color, borderColor: "#FFFFFF", glyphColor: "#FFFFFF", glyphText: text, scale: 1.1 });
         const marker = new AdvancedMarkerElement({
-            map: map,
-            position: { lat: cluster.lat, lng: cluster.lng },
-            content: pin.element
+            map: map, position: { lat: cluster.lat, lng: cluster.lng }, content: pin.element
         });
-
-        let rows = cluster.items.map(s => {
-            if (s.isStart || s.isFinal) return `<div style="padding:4px 0;">${s.studentName || 'نقطة'}</div>`;
-            if (s.stopType === 'assistant') return `<div style="padding:4px 0; font-weight:bold;">المرافق</div>`;
-            
-            let badge = 'bg-red'; let statusTxt = 'قيد الانتظار';
-            if (s.isAvailable === true || s.status === 'picked') { badge = 'bg-green'; statusTxt = 'مكتمل'; }
-
-            let details = s.gradeName || '';
-            return `<div style="border-bottom:1px solid #eee; padding: 6px 0;">
-                      <span class="status-badge ${badge}">${statusTxt}</span>
-                      <b style="margin-right:5px;">${s.studentName}</b>
-                      <br><span style="font-size:11px; color:#666; margin-right: 55px;">${details}</span>
-                    </div>`;
-        }).join('');
-
-        const contentString = `<div style="direction:rtl; text-align:right; padding:5px; min-width:200px;">
-                                 <h3 style="margin:0 0 8px 0; color:${color}; border-bottom:2px solid ${color}; padding-bottom:4px;">${headerHtml}</h3>
-                                 ${rows}
-                               </div>`;
+        
+        // Simple InfoWindow Content
+        const contentString = `<div style="padding:5px; direction:rtl; text-align:right;">
+            <b style="color:${color}">${headerHtml}</b><br>
+            ${cluster.items.map(s => s.studentName).join('<br>')}
+        </div>`;
 
         marker.addListener("click", () => {
             infoWindow.setContent(contentString);
             infoWindow.open(map, marker);
         });
-
         routeMarkers.push(marker);
     }
 
@@ -346,28 +303,10 @@
     }
 
     function haversineDistance(lat1, lng1, lat2, lng2) {
-      const R = 6371e3; 
-      const toRad = x => x * Math.PI / 180;
-      const dLat = toRad(lat2 - lat1); var dLng = toRad(lng2 - lng1);
+      const R = 6371e3; const toRad = x => x * Math.PI / 180;
+      const dLat = toRad(lat2 - lat1); const dLng = toRad(lng2 - lng1);
       const a = Math.sin(dLat/2)**2 + Math.cos(toRad(lat1))*Math.cos(toRad(lat2))*Math.sin(dLng/2)**2;
       return 2 * R * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-    }
-
-    function fitBoundsToRoute(directionsResult) {
-        const bounds = new google.maps.LatLngBounds();
-        bounds.union(directionsResult.routes[0].bounds);
-        // We do NOT fit bounds to bus continuously to avoid jumping
-        // But if bus exists during initial load, we include it
-        if (busMarker && busMarker.position) {
-             bounds.extend(busMarker.position);
-        }
-        map.fitBounds(bounds);
-    }
-    
-    function sendToFlutter(payload) {
-      const msg = typeof payload === 'string' ? payload : JSON.stringify(payload);
-      if (window.FlutterChan) window.FlutterChan.postMessage(msg);
-      else window.parent.postMessage(msg, "*");
     }
 
     function drawAllPins(clusters) {
@@ -378,6 +317,12 @@
          const bounds = new google.maps.LatLngBounds();
          clusters.forEach(c => bounds.extend({lat:c.lat, lng:c.lng}));
          map.fitBounds(bounds);
+    }
+
+    function sendToFlutter(payload) {
+      const msg = typeof payload === 'string' ? payload : JSON.stringify(payload);
+      if (window.FlutterChan) window.FlutterChan.postMessage(msg);
+      else window.parent.postMessage(msg, "*");
     }
   </script>
 </body>
