@@ -640,62 +640,84 @@
        const startPoint = clusters.find(c => c.isStart);
        const endPoint = clusters.find(c => c.isEnd);
        if (!startPoint || !endPoint) return;
-       const activeClusters = clusters.filter(c => !c.isExcluded);
-       const assistants = activeClusters.filter(c => c.stopType === 'assistant');
-       const studentsAndEmployees = activeClusters.filter(c => c !== startPoint && c !== endPoint && c.stopType !== 'assistant');
-       
-       let waypoints = [];
-       assistants.forEach(a => waypoints.push({ location: {lat: a.lat, lng: a.lng}, stopover: true }));
-       studentsAndEmployees.forEach(s => waypoints.push({ location: {lat: s.lat, lng: s.lng}, stopover: true }));
+
+       // 1. Separate Middle Stops (Students/Employees/Assistants)
+       // We exclude Start/End because they are the anchors
+       let middleStops = clusters.filter(c => c !== startPoint && c !== endPoint && !c.isExcluded);
+
+       // 2. 🔥 STRICT SORTING: Sort based on the Admin's order
+       middleStops.sort((a, b) => {
+           const orderA = a.minOrder || 9999;
+           const orderB = b.minOrder || 9999;
+           return orderA - orderB;
+       });
+
+       // 3. Create Waypoints in strict order
+       let waypoints = middleStops.map(s => ({ 
+           location: {lat: s.lat, lng: s.lng}, 
+           stopover: true 
+       }));
 
        directionsService.route({
            origin: { lat: startPoint.lat, lng: startPoint.lng },
            destination: { lat: endPoint.lat, lng: endPoint.lng },
-           waypoints: waypoints, travelMode: google.maps.TravelMode.DRIVING, optimizeWaypoints: true,
+           waypoints: waypoints, 
+           travelMode: google.maps.TravelMode.DRIVING, 
+           optimizeWaypoints: false, // 🔥 DISABLED: We trust your order
        }, (result, status) => {
            if (status === "OK") {
                directionsRenderer.setDirections(result);
-               const orderIndices = result.routes[0].waypoint_order;
+               
+               // 4. Manual Sequencing (Since we know the order is 1->2->3)
                let orderedIds = [];
                let visualCounter = 1;
 
-               orderedIds.push(startPoint.items[0].id);
-               orderIndices.forEach(idx => {
-                   const cluster = [...assistants, ...studentsAndEmployees][idx];
+               // A. Add Start IDs
+               startPoint.items.forEach(i => orderedIds.push(i.id));
+
+               // B. Add Middle IDs (Sorted)
+               middleStops.forEach(cluster => {
                    cluster.items.forEach(item => orderedIds.push(item.id));
-                   
+
+                   // Update Visual Number on Pin
                    const markerObj = window.routeMarkers.find(m => 
                        Math.abs(m.lat - cluster.lat) < 0.00001 && 
                        Math.abs(m.lng - cluster.lng) < 0.00001
                    );
+
                    if (markerObj && markerObj.pin) {
-                       const activeItems = cluster.items.filter(s => (s.type === 'student' || s.type === 'employee') && !s.isExcluded);
-                       if (activeItems.length > 0) {
+                       // Only number students/employees (Assistant gets 'A')
+                       if (cluster.stopType !== 'assistant') {
                            markerObj.pin.glyphText = visualCounter.toString();
                            visualCounter++;
                        }
                    }
                });
-               orderedIds.push(endPoint.items[0].id);
 
-               if (currentShift === 'PM' && orderIndices.length > 0) {
-                   const lastIndex = orderIndices[orderIndices.length - 1];
-                   const lastCluster = [...assistants, ...studentsAndEmployees][lastIndex];
-                   if (lastCluster) pmLastStudentLocation = { lat: lastCluster.lat, lng: lastCluster.lng };
+               // C. Add End IDs
+               endPoint.items.forEach(i => orderedIds.push(i.id));
+
+               // 5. PM Logic for Arrival Trigger
+               if (currentShift === 'PM' && middleStops.length > 0) {
+                   const lastCluster = middleStops[middleStops.length - 1];
+                   pmLastStudentLocation = { lat: lastCluster.lat, lng: lastCluster.lng };
                }
+
+               // 6. Update Stats
                let dist = 0, dur = 0;
                result.routes[0].legs.forEach(l => { dist += l.distance.value; dur += l.duration.value; });
                updateRouteSummary((dist/1000).toFixed(1), Math.round(dur/60));
+
+               // 7. Sync with App
                window.orderedStopIds = orderedIds; 
                sendToFlutter({ action: 'routeOrdered', orderedIds: orderedIds });
+
            } else {
-               // 🔥 API FAILED (e.g. Offline mid-request) -> FALLBACK
                console.warn("❌ Routing API Failed (" + status + "). Reverting to Fallback.");
                calculateFallbackRoute(clusters);
            }
        });
     }
-
     function sendToFlutter(payload) {
         if (window.FlutterChan) window.FlutterChan.postMessage(JSON.stringify(payload));
         else window.parent.postMessage(payload, "*");
