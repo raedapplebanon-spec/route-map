@@ -644,44 +644,44 @@
        const endPoint = clusters.find(c => c.isEnd);
        if (!startPoint || !endPoint) return;
 
-       // 1. Separate Middle Stops
-       let middleStops = clusters.filter(c => c !== startPoint && c !== endPoint && !c.isExcluded);
+       // 1. Get EVERYONE (Active + Excluded) so we don't lose the numbers
+       let allMiddleStops = clusters.filter(c => c !== startPoint && c !== endPoint);
 
-       // 2. 🔥 STRICT SORTING: Sort based on the Admin's order
-       middleStops.sort((a, b) => {
+       // 2. Sort EVERYONE based on Admin's order
+       allMiddleStops.sort((a, b) => {
            const orderA = a.minOrder || 9999;
            const orderB = b.minOrder || 9999;
            return orderA - orderB;
        });
 
-       // 3. Create Waypoints
-       let waypoints = middleStops.map(s => ({ 
-           location: {lat: s.lat, lng: s.lng}, 
-           stopover: true 
-       }));
+       // 3. Filter for Blue Line (Only send Active stops to Google)
+       let activeWaypoints = allMiddleStops
+           .filter(c => !c.isExcluded)
+           .map(s => ({ location: {lat: s.lat, lng: s.lng}, stopover: true }));
 
+       // 4. Request Route (Skips Excluded)
        directionsService.route({
            origin: { lat: startPoint.lat, lng: startPoint.lng },
            destination: { lat: endPoint.lat, lng: endPoint.lng },
-           waypoints: waypoints, 
+           waypoints: activeWaypoints, 
            travelMode: google.maps.TravelMode.DRIVING, 
-           optimizeWaypoints: false, // 🔥 DISABLED: We trust your order
+           optimizeWaypoints: false, 
        }, (result, status) => {
            if (status === "OK") {
                directionsRenderer.setDirections(result);
                
-               // 4. 🔥 MANUAL SEQUENCING (Ignore Google's indices, use our sorted list)
                let orderedIds = [];
                let visualCounter = 1;
 
                // A. Add Start IDs
                startPoint.items.forEach(i => orderedIds.push(i.id));
 
-               // B. Add Middle IDs (Iterate our sorted list directly)
-               middleStops.forEach(cluster => {
+               // B. Loop through ALL stops (Active + Excluded)
+               allMiddleStops.forEach(cluster => {
+                   // Add IDs to tracking list (even if excluded, so we know they exist)
                    cluster.items.forEach(item => orderedIds.push(item.id));
 
-                   // Update Visual Number on Pin
+                   // Update Visual Number
                    const markerObj = window.routeMarkers.find(m => 
                        Math.abs(m.lat - cluster.lat) < 0.00001 && 
                        Math.abs(m.lng - cluster.lng) < 0.00001
@@ -689,6 +689,7 @@
 
                    if (markerObj && markerObj.pin) {
                        if (cluster.stopType !== 'assistant') {
+                           // ✅ ALWAYS Increment Number (Even for Gray Pins)
                            markerObj.pin.glyphText = visualCounter.toString();
                            visualCounter++;
                        }
@@ -698,23 +699,17 @@
                // C. Add End IDs
                endPoint.items.forEach(i => orderedIds.push(i.id));
 
-               // 5. PM Logic for Arrival Trigger
-               if (currentShift === 'PM' && middleStops.length > 0) {
-                   const lastCluster = middleStops[middleStops.length - 1];
-                   pmLastStudentLocation = { lat: lastCluster.lat, lng: lastCluster.lng };
-               }
-
-               // 6. Update Stats
+               // 5. Update Stats
                let dist = 0, dur = 0;
                result.routes[0].legs.forEach(l => { dist += l.distance.value; dur += l.duration.value; });
                updateRouteSummary((dist/1000).toFixed(1), Math.round(dur/60));
 
-               // 7. Sync with App
+               // 6. Sync
                window.orderedStopIds = orderedIds; 
                sendToFlutter({ action: 'routeOrdered', orderedIds: orderedIds });
 
            } else {
-               console.warn("❌ Routing API Failed (" + status + "). Reverting to Fallback.");
+               console.warn("❌ Routing API Failed. Reverting.");
                calculateFallbackRoute(clusters);
            }
        });
