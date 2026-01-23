@@ -5,76 +5,17 @@
   <title>All Routes Admin Map</title>
   <style>
     /* ✅ 1. Layout Settings */
-    html, body {
-      height: 100%;
-      margin: 0;
-      padding: 0;
-      overflow: hidden;
-      font-family: "Segoe UI", Tahoma, sans-serif;
-    }
-
-    #map {
-      height: 100%;
-      width: 100%;
-    }
+    html, body { height: 100%; margin: 0; padding: 0; overflow: hidden; font-family: "Segoe UI", Tahoma, sans-serif; }
+    #map { height: 100%; width: 100%; }
 
     /* ✅ 2. Search Box */
-    #pac-input {
-      display: none; 
-      background-color: #fff;
-      font-family: 'Segoe UI', Tahoma, sans-serif;
-      font-size: 14px;
-      font-weight: 500;
-      margin-top: 10px;
-      margin-left: 10px;
-      padding: 0 12px;
-      width: 280px;
-      height: 40px;
-      border-radius: 8px;
-      border: 1px solid #ddd;
-      box-shadow: 0 4px 6px rgba(0,0,0,0.15);
-      outline: none;
-      direction: rtl;
-    }
+    #pac-input { display: none; background-color: #fff; font-family: 'Segoe UI', Tahoma, sans-serif; font-size: 14px; font-weight: 500; margin-top: 10px; margin-left: 10px; padding: 0 12px; width: 280px; height: 40px; border-radius: 8px; border: 1px solid #ddd; box-shadow: 0 4px 6px rgba(0,0,0,0.15); outline: none; direction: rtl; }
 
     /* ✅ 3. Legend */
-    #legend {
-      display: none; 
-      background: rgba(255, 255, 255, 0.95);
-      margin: 12px;
-      padding: 12px 16px;
-      border-radius: 8px;
-      font-size: 13px;
-      box-shadow: 0 4px 10px rgba(0,0,0,0.2);
-      max-height: 300px;
-      overflow-y: auto;
-      direction: rtl;
-      min-width: 160px;
-      border: 1px solid #eee;
-    }
-
-    .legend-header {
-      font-weight: bold;
-      margin-bottom: 8px;
-      border-bottom: 1px solid #ddd;
-      padding-bottom: 6px;
-      color: #333;
-    }
-    
-    .legend-item {
-      display: flex;
-      align-items: center;
-      margin-bottom: 6px;
-      padding: 2px 0;
-    }
-
-    .color-box {
-      width: 14px;
-      height: 14px;
-      margin-left: 8px;
-      border-radius: 4px;
-      border: 1px solid rgba(0,0,0,0.1);
-    }
+    #legend { display: none; background: rgba(255, 255, 255, 0.95); margin: 12px; padding: 12px 16px; border-radius: 8px; font-size: 13px; box-shadow: 0 4px 10px rgba(0,0,0,0.2); max-height: 300px; overflow-y: auto; direction: rtl; min-width: 160px; border: 1px solid #eee; }
+    .legend-header { font-weight: bold; margin-bottom: 8px; border-bottom: 1px solid #ddd; padding-bottom: 6px; color: #333; }
+    .legend-item { display: flex; align-items: center; margin-bottom: 6px; padding: 2px 0; }
+    .color-box { width: 14px; height: 14px; margin-left: 8px; border-radius: 4px; border: 1px solid rgba(0,0,0,0.1); }
   </style>
 
   <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCYaJ4Gjq36mq8swYgjNXOYr5mKZi45niA&libraries=places,marker&callback=initMap&loading=async&v=weekly" async defer></script>
@@ -83,7 +24,6 @@
 
   <input id="pac-input" class="controls" type="text" placeholder="بحث عن طالب أو موقع..." />
   <div id="legend"></div>
-  
   <div id="map"></div>
 
   <script>
@@ -108,48 +48,55 @@
       return 2 * R * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
     }
 
+    // 🔥 MODIFIED: Now extracts and saves 'minOrder' for sorting
     function groupCloseLocations(stops, tolerance = 15) {
       const clusters = [];
       stops.forEach(stop => {
         let placed = false;
         
-        // 🔥 NORMALIZE DATA: Handle stopType (camelCase) or stop_type (snake_case)
+        // Normalize Data
         const rawType = stop.stopType || stop.stop_type || "";
         const type = rawType.toLowerCase().trim();
         const shift = (stop.timeShift || "").toUpperCase().trim();
-
-        // Fix Lat/Lng parsing
         const sLat = parseFloat(stop.lat);
         const sLng = parseFloat(stop.lng);
+        
+        // Check for Stop Order (Support camelCase and snake_case)
+        const rawOrder = (stop.stop_order !== undefined) ? stop.stop_order : stop.stopOrder;
+        const stopOrderVal = (rawOrder !== undefined && rawOrder !== null) ? parseInt(rawOrder) : 0;
 
         for (const c of clusters) {
           const d = haversineDistance(c.lat, c.lng, sLat, sLng);
           if (d < tolerance) {
             c.items.push(stop);
-            // Update cluster properties if this specific stop has Start/Final flags
             if (stop.isStart === true || stop.is_start_stop === true) c.isStart = true;
             if (stop.isFinal === true || stop.is_end_stop === true) c.isFinal = true;
             
-            // If any item in cluster is assistant, mark cluster as assistant
             if (type === 'assistant') {
               c.stopType = 'assistant';
               if (shift) c.timeShift = shift;
             }
             c.hideMarker = c.hideMarker && (stop.hideMarker === true || stop.hideMarker === 'true');
+            
+            // 🔥 Keep lowest order in cluster (for sorting)
+            if (stopOrderVal > 0) {
+                 if (!c.minOrder || stopOrderVal < c.minOrder) c.minOrder = stopOrderVal;
+            }
+
             placed = true;
             break;
           }
         }
         if (!placed) {
           clusters.push({
-            lat: sLat,
-            lng: sLng,
+            lat: sLat, lng: sLng,
             items: [stop],
             isStart: (stop.isStart === true || stop.is_start_stop === true),
             isFinal: (stop.isFinal === true || stop.is_end_stop === true),
-            stopType: type, // This will be 'employee', 'student', or 'assistant'
+            stopType: type,
             timeShift: shift,
-            hideMarker: (stop.hideMarker === true || stop.hideMarker === 'true')
+            hideMarker: (stop.hideMarker === true || stop.hideMarker === 'true'),
+            minOrder: (stopOrderVal > 0) ? stopOrderVal : 9999 // Default to high if no order
           });
         }
       });
@@ -166,9 +113,7 @@
       map = new Map(document.getElementById("map"), {
         center: { lat: 32.028031, lng: 35.704308 },
         zoom: 13,
-        mapTypeControl: true,
-        streetViewControl: false,
-        fullscreenControl: false,
+        mapTypeControl: true, streetViewControl: false, fullscreenControl: false,
         mapId: "48c2bb983bd19c1c44d95cb7" 
       });
 
@@ -187,7 +132,6 @@
 
       mapReady = true;
       window.addEventListener("message", handleMessage);
-      
       console.log("✅ Map Initialized");
     };
 
@@ -251,7 +195,6 @@
         legend.style.display = "none";
       }
 
-      // 3. Draw Available
       if (availableData && availableData.length > 0) {
         renderAvailableStudents(availableData, bounds);
       }
@@ -261,8 +204,7 @@
       }
     }
 
-    // --- SINGLE ROUTE PROCESSOR ---
-    // --- SINGLE ROUTE PROCESSOR (FIXED) ---
+    // --- SINGLE ROUTE PROCESSOR (MANUAL SORT) ---
     function processSingleRoute(routeId, rawPoints, color, bounds) {
       return new Promise((resolve) => {
         
@@ -270,9 +212,7 @@
         
         const dService = new google.maps.DirectionsService();
         const dRenderer = new google.maps.DirectionsRenderer({
-          map: map,
-          suppressMarkers: true,
-          preserveViewport: true,
+          map: map, suppressMarkers: true, preserveViewport: true,
           polylineOptions: { strokeColor: color, strokeOpacity: 0.8, strokeWeight: 6 }
         });
 
@@ -289,11 +229,10 @@
           let pinHeader = "نقطة توقف";
           let borderColor = color;
 
-          // 🔥 VISUAL PRIORITY: Check Assistant FIRST so they get "A" even if they are the Start
           if (cluster.stopType === 'assistant') {
             pinText = cluster.timeShift === 'AM' ? "A" : "P";
             pinHeader = "المساعد (" + cluster.timeShift + ")";
-            borderColor = "#000"; // Black border for VIPs
+            borderColor = "#000";
           } 
           else if (cluster.isStart) {
             pinText = "S"; pinHeader = "نقطة البداية"; borderColor = "#000";
@@ -307,94 +246,30 @@
           routeObj.markers.push(marker);
         });
 
-        // 2. Routing Logic (Simplified)
+        // 2. Identify Anchors
         const startPoint = clusters.find(c => c.isStart);
         const endPoint = clusters.find(c => c.isFinal);
 
-        // If missing anchors, we can't route
-        if (!startPoint || !endPoint) {
-          resolve(); 
-          return;
-        }
+        if (!startPoint || !endPoint) { resolve(); return; }
 
-        // 🔥 LOGIC FIX: Just grab everything BETWEEN Start and End
-        // We do NOT look for assistants specifically anymore. Dart handled that.
-        const middleStops = clusters.filter(c => c !== startPoint && c !== endPoint);
+        // 3. Extract Middle Stops (Students/Employees)
+        let middleStops = clusters.filter(c => c !== startPoint && c !== endPoint);
 
-        if (middleStops.length > 0) {
-          const waypointsForAPI = middleStops.map(s => ({ location: { lat: s.lat, lng: s.lng }, stopover: true }));
-          
-          dService.route({
-            origin: { lat: startPoint.lat, lng: startPoint.lng },
-            destination: { lat: endPoint.lat, lng: endPoint.lng },
-            waypoints: waypointsForAPI,
-            travelMode: google.maps.TravelMode.DRIVING,
-            optimizeWaypoints: true, // Let Google Shuffle the middle
-          }, (result, status) => {
-            if (status === "OK") {
-              // Get sorted sequence of the MIDDLE stops
-              const optimizedOrder = result.routes[0].waypoint_order;
-              const sortedMiddleStops = optimizedOrder.map(index => middleStops[index]);
+        // 🔥 CRITICAL: Sort by minOrder (from Dart payload)
+        middleStops.sort((a, b) => {
+            const orderA = a.minOrder || 9999;
+            const orderB = b.minOrder || 9999;
+            return orderA - orderB;
+        });
 
-              // Draw Line & Number Pins
-              drawFinalPolyline(dService, dRenderer, startPoint, endPoint, sortedMiddleStops, routeObj, resolve);
-            } else {
-              console.error("Routing Failed:", status);
-              resolve();
-            }
-          });
-        } else {
-          // No middle stops, just Start -> End
-          drawFinalPolyline(dService, dRenderer, startPoint, endPoint, [], routeObj, resolve);
-        }
+        // 4. Draw Polyline directly (No Google Optimization)
+        drawFinalPolyline(dService, dRenderer, startPoint, endPoint, middleStops, routeObj, resolve);
       });
     }
 
-    // --- DRAWER (FIXED) ---
-    function drawFinalPolyline(service, renderer, start, end, sortedMiddleStops, routeObj, onComplete) {
-      
-      // 🔥 FIX: Waypoints must ONLY be the middle stops. 
-      // Do NOT add Start/End here, or Google visits them twice.
-      const waypoints = sortedMiddleStops.map(s => ({ location: { lat: s.lat, lng: s.lng }, stopover: true }));
-
-      service.route({
-        origin: { lat: start.lat, lng: start.lng },
-        destination: { lat: end.lat, lng: end.lng },
-        waypoints: waypoints,
-        travelMode: google.maps.TravelMode.DRIVING,
-        optimizeWaypoints: false, // Order is already sorted above
-      }, (result, status) => {
-        if (status === "OK") {
-          renderer.setDirections(result);
-
-          // Numbering Logic
-          let counter = 1;
-          sortedMiddleStops.forEach((stopCluster) => {
-             // We only number the MIDDLE stops (Students/Employees)
-             // Assistants/Start/End already have letters (A, S, E)
-             
-             // Safety check: Don't number the assistant if they ended up in the middle (unlikely now)
-             const isAssistant = stopCluster.stopType === 'assistant';
-             
-             if (!isAssistant) {
-                 const m = routeObj.markers.find(mark => 
-                   Math.abs(mark.position.lat - stopCluster.lat) < 0.0001 && 
-                   Math.abs(mark.position.lng - stopCluster.lng) < 0.0001
-                 );
-                 
-                 if (m && m.content) {
-                     // Update the Pin Text to 1, 2, 3...
-                     m.content.glyphText = counter.toString();
-                     counter++;
-                 }
-             }
-          });
-        }
-        onComplete();
-      });
-    }
+    // --- DRAWER ---
     function drawFinalPolyline(service, renderer, start, end, orderedStops, routeObj, onComplete) {
-      // Prepare waypoints for the drawing call (excluding start/end)
+      // Prepare waypoints (excluding start/end)
       const waypoints = orderedStops.map(s => ({ location: { lat: s.lat, lng: s.lng }, stopover: true }));
 
       service.route({
@@ -402,31 +277,26 @@
         destination: { lat: end.lat, lng: end.lng },
         waypoints: waypoints,
         travelMode: google.maps.TravelMode.DRIVING,
-        optimizeWaypoints: false, // Order is fixed now
+        optimizeWaypoints: false, // 🔥 DISABLED: We trust the sorted order
       }, (result, status) => {
         if (status === "OK") {
           renderer.setDirections(result);
 
+          // Numbering Logic (Sequential 1, 2, 3...)
           let counter = 1;
           orderedStops.forEach((stopCluster) => {
-             // Only number students AND employees (skip Assistants)
-             const isAssistant = stopCluster.stopType === 'assistant';
-             
-             if (!isAssistant) {
-                 const m = routeObj.markers.find(mark => 
-                   Math.abs(mark.position.lat - stopCluster.lat) < 0.0001 && 
-                   Math.abs(mark.position.lng - stopCluster.lng) < 0.0001
-                 );
-                 
-                 if (m && m.content) {
-                     // Update Glyph Text to Number
-                     // Since AdvancedMarkerElement.content is a DOM element (pin.element), 
-                     // we technically need to update the PinElement itself.
-                     // A safe hack for current Maps API versions:
-                     m.content.glyphText = counter.toString();
-                     counter++;
-                 }
-             }
+              const isAssistant = stopCluster.stopType === 'assistant';
+              if (!isAssistant) {
+                  const m = routeObj.markers.find(mark => 
+                    Math.abs(mark.position.lat - stopCluster.lat) < 0.0001 && 
+                    Math.abs(mark.position.lng - stopCluster.lng) < 0.0001
+                  );
+                  
+                  if (m && m.content) {
+                      m.content.glyphText = counter.toString();
+                      counter++;
+                  }
+              }
           });
         }
         onComplete();
@@ -466,30 +336,22 @@
       return marker;
     }
 
-    // 🔥 UPDATED: Now handles Employee data and new JSON keys
     function buildInfoWindowHtml(cluster, title, color) {
       let rows = cluster.items.map(x => {
-        // Normalize keys (studentName vs display_name, etc)
         const name = x.studentName || x.display_name || "مستخدم";
-        
-        // Determine type
         const type = (x.stopType || x.stop_type || "").toLowerCase().trim();
-        
         let details = "";
         
         if (type === 'employee') {
             details = "موظف";
         } else {
-            // Handle Grade/Section (camelCase or snake_case)
             const g = x.gradeName || x.grade_name || "";
             const s = x.sectionName || x.section_name || "";
-            if (g || s) {
-                details = `${g} - ${s}`;
-            }
+            if (g || s) details = `${g} - ${s}`;
         }
 
         return `<div style="margin-bottom:6px; border-bottom:1px solid #eee; padding-bottom:4px;">
-                 <b>${name}</b><br><span style="font-size:12px; color:#555;">${details}</span>
+                  <b>${name}</b><br><span style="font-size:12px; color:#555;">${details}</span>
                 </div>`;
       }).join('');
       
