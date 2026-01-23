@@ -617,23 +617,30 @@
     }
 
     // 🛡️ OFFLINE FALLBACK ROUTER
+    // 🛡️ OFFLINE FALLBACK ROUTER (Updated with Sort)
     function calculateFallbackRoute(clusters) {
        let orderedIds = [];
-       // Simple Order: Start -> Others -> End
        const startPoint = clusters.find(c => c.isStart);
        const endPoint = clusters.find(c => c.isEnd);
+       
+       // 1. Filter Middle Stops
        const others = clusters.filter(c => c !== startPoint && c !== endPoint);
+
+       // 2. 🔥 ADDED: Sort Offline Route by Admin Order too
+       others.sort((a, b) => {
+           const orderA = a.minOrder || 9999;
+           const orderB = b.minOrder || 9999;
+           return orderA - orderB;
+       });
 
        if (startPoint) startPoint.items.forEach(i => orderedIds.push(i.id));
        others.forEach(c => c.items.forEach(i => orderedIds.push(i.id)));
        if (endPoint) endPoint.items.forEach(i => orderedIds.push(i.id));
 
-       // Update Visuals
        window.orderedStopIds = orderedIds; 
        restoreMarkerVisuals(); 
        
-       // Alert the user that optimization failed but order is preserved
-       console.log("⚠️ Fallback Route Order Applied (Linear)");
+       console.log("⚠️ Fallback Route Order Applied (Sorted Linear)");
        sendToFlutter({ action: 'routeOrdered', orderedIds: orderedIds });
     }
 
