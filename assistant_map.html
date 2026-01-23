@@ -71,6 +71,7 @@
     let userLocationMarker = null;
     let radarCircle = null;
     let isBusTrackingActive = false;
+    let lastArrivalCheckTime = 0;
 
     // 🔥 CONFIG: 300 meters
     const APPROACH_RADIUS = 300; 
@@ -312,12 +313,22 @@
     // ✅ 4. LOGIC HANDLER (Hardened against Duplicates)
     // =========================================================
     function checkArrivalLogic(myLocObj) {
+          
+          // 🔥 FIX: THROTTLE (Prevent Machine-Gun Firing)
+          // Only allow this function to run once every 3 seconds
+          const now = Date.now();
+          if (now - lastArrivalCheckTime < 3000) {
+              return; // Too soon, skip this check
+          }
+          lastArrivalCheckTime = now; 
+
           if (window.orderedStopIds && window.orderedStopIds.length > 0) {
               let firstPendingIndex = -1;
               
               // 1. Find the first stop that has ANY student not yet alerted
               for (let i = 0; i < window.orderedStopIds.length; i++) {
                   const id = window.orderedStopIds[i];
+                  // Force String comparison to be safe
                   const markerObj = window.routeMarkers.find(m => m.items.some(item => String(item.id) === String(id)));
                   
                   if (markerObj) {
@@ -325,7 +336,7 @@
                           (s.type === 'student' || s.type === 'employee') && 
                           s.status === 'pending' && 
                           !s.isExcluded &&
-                          !window.alertedStudentIds.has(String(s.id)) // Force String Check
+                          !window.alertedStudentIds.has(String(s.id)) 
                       );
                       if (isPending) { firstPendingIndex = i; break; }
                   }
@@ -348,7 +359,6 @@
                           const distToStop = google.maps.geometry.spherical.computeDistanceBetween(myLocObj, stopLoc);
                           
                           if (distToStop < APPROACH_RADIUS) {
-                              // 🔥 CRITICAL FILTER: Only include students NOT in the Set
                               const activeItems = targetMarker.items.filter(s => 
                                   (s.type === 'student' || s.type === 'employee') && 
                                   s.status === 'pending' && 
@@ -367,7 +377,7 @@
                                   console.log("🔔 Triggering Alert for: " + namesAtThisStop);
                               }
                           } else {
-                              break; // Stop looking further if the current stop is far
+                              break; 
                           }
                       }
                   }
