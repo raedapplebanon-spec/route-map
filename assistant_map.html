@@ -399,24 +399,29 @@
 
           if (!hasTriggeredArrival) { 
               let targetLoc = null;
-              let triggerRadius = 50; 
+              let triggerRadius = 100; // ✅ Default is now 100
               let canTrigger = true;
 
               if (currentRouteType === 'first_morning') {
-                  if (endStopLocation) { targetLoc = endStopLocation; triggerRadius = 300; }
+                  // ✅ Changed 300 -> 100
+                  if (endStopLocation) { targetLoc = endStopLocation; triggerRadius = 100; }
               }
               else if (currentRouteType === 'midday') {
                   if (endStopLocation) {
-                      targetLoc = endStopLocation; triggerRadius = 300;
+                      // ✅ Changed 300 -> 100
+                      targetLoc = endStopLocation; triggerRadius = 100;
                       if (!hasLeftStartZone) canTrigger = false; 
                   }
               }
               else if (currentRouteType === 'last_evening') {
+                  // Already 100, kept as is
                   if (pmLastStudentLocation) { targetLoc = pmLastStudentLocation; triggerRadius = 100; } 
                   else if (endStopLocation) { targetLoc = endStopLocation; triggerRadius = 100; }
               }
               else {
-                  if (currentShift === 'AM' && endStopLocation) { targetLoc = endStopLocation; triggerRadius = 300; }
+                  // ✅ Changed 300 -> 100 for generic AM
+                  if (currentShift === 'AM' && endStopLocation) { targetLoc = endStopLocation; triggerRadius = 100; }
+                  // ✅ Changed 300 -> 100 for generic others
                   else if (endStopLocation) { targetLoc = endStopLocation; triggerRadius = 100; }
               }
 
