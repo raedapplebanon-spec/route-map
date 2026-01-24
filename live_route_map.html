@@ -23,16 +23,18 @@
     .legend-row:last-child { margin-bottom: 0; }
     .legend-color { width: 16px; height: 16px; border-radius: 4px; margin-left: 8px; box-shadow: inset 0 0 2px rgba(0,0,0,0.2); }
     
-    /* 3. NEW: ROUTE STATS (Distance & Time) */
+    /* 3. UPDATED: ROUTE STATS (Center, No Absolute) */
     .route-stats {
-        display: none; /* Hidden until route loads */
-        position: absolute; top: 10px; left: 10px;
+        display: none; 
+        /* Removed absolute positioning to let Google Maps control layout */
+        margin-top: 10px;
         background: rgba(255, 255, 255, 0.95);
         padding: 10px 15px; border-radius: 8px;
         box-shadow: 0 2px 6px rgba(0,0,0,0.3);
         font-size: 13px; font-weight: bold;
-        z-index: 1000; direction: rtl; text-align: right;
+        direction: rtl; text-align: right;
         border-right: 4px solid #1a73e8;
+        pointer-events: auto;
     }
 
     /* 4. MARKER STYLES */
@@ -70,6 +72,9 @@
     let busMarker = null;
     let mapReady = false;
     
+    // 🔥 NEW: Logic to prevent map from resetting zoom repeatedly
+    let initialBoundsSet = false;
+
     // Libraries
     let AdvancedMarkerElement, PinElement;
 
@@ -92,7 +97,7 @@
           zoom: 12,
           mapId: MY_MAP_ID,
           
-          // 🔥 ENABLE SATELLITE MODE TOGGLE HERE
+          // SATELLITE TOGGLE (Positioned Left Top)
           mapTypeControl: true, 
           mapTypeControlOptions: {
               style: google.maps.MapTypeControlStyle.DROPDOWN_MENU,
@@ -105,11 +110,15 @@
 
         // Setup UI
         map.controls[google.maps.ControlPosition.RIGHT_BOTTOM].push(document.getElementById("legend"));
-        // Push Stats to top left (below satellite control)
-        map.controls[google.maps.ControlPosition.TOP_LEFT].push(document.getElementById("route-stats"));
+        
+        // 🔥 CHANGED: Put Stats in TOP_CENTER to avoid overlap
+        map.controls[google.maps.ControlPosition.TOP_CENTER].push(document.getElementById("route-stats"));
 
         infoWindow = new google.maps.InfoWindow();
         directionsService = new google.maps.DirectionsService();
+        
+        // preserveViewport: true prevents internal flickering, 
+        // but we manage manual fitting ourselves
         directionsRenderer = new google.maps.DirectionsRenderer({
             map: map, suppressMarkers: true, preserveViewport: true,
             polylineOptions: { strokeColor: "#1a73e8", strokeOpacity: 0.8, strokeWeight: 5 }
@@ -126,7 +135,7 @@
     };
 
     // =========================================================
-    // 3. BRIDGE (CRITICAL FOR MOBILE)
+    // 3. BRIDGE
     // =========================================================
     window.handleDirectUpdate = function(lat, lng) {
         updateBusUI({ lat: lat, lng: lng });
@@ -140,21 +149,19 @@
         let data = event.data;
         if (typeof data === 'string') { try { data = JSON.parse(data); } catch(e){} }
 
-        // ROUTE DATA
         if (data.action === "setRouteData" && mapReady) {
             const routePoints = (data.routesGrouped && data.routesGrouped.length > 0) 
                               ? data.routesGrouped[0].points : [];
             renderRouteOnMap(routePoints);
         }
 
-        // BUS DATA
         if (data.action === "updateBusLocation" && mapReady) {
             updateBusUI(data);
         }
     });
 
     // =========================================================
-    // 5. PARENT-STYLE BUS LOGIC
+    // 5. LIVE BUS LOGIC
     // =========================================================
     function updateBusUI(data) {
         if (!mapReady) return;
@@ -212,16 +219,18 @@
     }
 
     // =========================================================
-    // 6. ROUTE RENDERING (WITH DISTANCE/TIME CALCULATION)
+    // 6. ROUTE RENDERING (With Logic to Preserve Zoom)
     // =========================================================
     function renderRouteOnMap(points) {
         if (!points || points.length === 0) return;
 
         routeMarkers.forEach(m => m.map = null);
         routeMarkers = [];
-        directionsRenderer.setDirections({ routes: [] });
-
-        // Hide stats initially
+        
+        // NOTE: We do NOT clear directionsRenderer here immediately 
+        // to prevent flickering if the route hasn't changed.
+        
+        // Hide stats initially if re-calculating
         document.getElementById("route-stats").style.display = "none";
 
         const startPoint = points.find(p => p.isStart);
@@ -269,14 +278,14 @@
                 if (status === "OK") {
                     directionsRenderer.setDirections(result);
                     
-                    // 🔥 CALCULATE TOTAL DISTANCE & TIME
+                    // CALC STATS
                     let totalDist = 0;
                     let totalDur = 0;
                     const route = result.routes[0];
                     if (route && route.legs) {
                         route.legs.forEach(leg => {
-                            totalDist += leg.distance.value; // meters
-                            totalDur += leg.duration.value; // seconds
+                            totalDist += leg.distance.value;
+                            totalDur += leg.duration.value;
                         });
                     }
                     const distKm = (totalDist / 1000).toFixed(1);
@@ -288,9 +297,14 @@
                     statsDiv.style.display = "block";
                     statsContent.innerHTML = `🏁 المسافة: ${distKm} كم <br> ⏱️ الوقت: ${durMin} دقيقة`;
 
-                    const bounds = new google.maps.LatLngBounds();
-                    bounds.union(result.routes[0].bounds);
-                    map.fitBounds(bounds);
+                    // 🔥 NEW: ONLY FIT BOUNDS ONCE
+                    // This lets the user move the map freely after the initial load
+                    if (!initialBoundsSet) {
+                        const bounds = new google.maps.LatLngBounds();
+                        bounds.union(result.routes[0].bounds);
+                        map.fitBounds(bounds);
+                        initialBoundsSet = true;
+                    }
                 }
             });
         }
@@ -359,7 +373,11 @@
          });
          const bounds = new google.maps.LatLngBounds();
          clusters.forEach(c => bounds.extend({lat:c.lat, lng:c.lng}));
-         map.fitBounds(bounds);
+         // Fallback fit if no route is drawn
+         if (!initialBoundsSet) {
+             map.fitBounds(bounds);
+             initialBoundsSet = true;
+         }
     }
 
     function sendToFlutter(payload) {
