@@ -6,9 +6,32 @@
   <style>
     html, body, #map { height: 100%; margin: 0; padding: 0; font-family: 'Segoe UI', sans-serif; }
     
-    .bus-marker-container {
-      pointer-events: none;
+    .bus-marker-container { pointer-events: none; }
+
+    /* Style for the Group Marker (when students are close) */
+    .group-marker {
+      background-color: #1a73e8; /* Google Blue */
+      color: white;
+      border-radius: 50%;
+      width: 30px;
+      height: 30px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: bold;
+      border: 2px solid white;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+      cursor: pointer;
     }
+
+    /* Style for the Popup List */
+    .student-list-popup {
+      padding: 5px;
+      text-align: right; /* RTL alignment */
+    }
+    .student-list-popup h4 { margin: 0 0 5px 0; font-size: 14px; color: #333; }
+    .student-list-popup ul { margin: 0; padding-right: 20px; }
+    .student-list-popup li { font-size: 13px; margin-bottom: 2px; }
 
     .custom-map-control {
       background-color: #fff;
@@ -35,7 +58,8 @@
   <script>
     let map;
     let busMarker;
-    let studentMarkers = {};
+    let studentMarkers = []; // Changed to array to manage clusters easier
+    let infoWindow; // For showing the names
     let isMapInit = false;
     let AdvancedMarkerElement, PinElement;
     
@@ -48,6 +72,9 @@
       try {
         const { Map } = await google.maps.importLibrary("maps");
         const markerLib = await google.maps.importLibrary("marker");
+        // Ensure geometry library is loaded for distance calculation
+        await google.maps.importLibrary("geometry"); 
+
         AdvancedMarkerElement = markerLib.AdvancedMarkerElement;
         PinElement = markerLib.PinElement;
 
@@ -62,13 +89,15 @@
           fullscreenControl: false
         });
 
+        // Initialize one shared InfoWindow
+        infoWindow = new google.maps.InfoWindow();
+
         // RECENTER BUTTON
         const recenterBtn = document.createElement("button");
         recenterBtn.innerHTML = "🎯 إعادة ضبط العرض";
         recenterBtn.classList.add("custom-map-control");
         recenterBtn.addEventListener("click", () => {
           isUserPanned = false;
-          // Only zoom/fit when the user explicitly asks for it
           recenterView(true); 
         });
 
@@ -80,7 +109,6 @@
         isMapInit = true;
         console.log("✅ Parent Map Ready");
 
-        // Notify Flutter
         const readyPayload = { action: "mapIsReady" };
         if (window.chrome && window.chrome.webview) {
             window.chrome.webview.postMessage(readyPayload);
@@ -93,40 +121,116 @@
       }
     }
 
-    // --- 2. SMOOTH ANIMATION LOGIC ---
+    // --- 2. CLUSTERING LOGIC ---
+    function groupStudents(students) {
+      const groups = [];
+      const threshold = 20; // 20 meters
+
+      students.forEach(student => {
+        let added = false;
+        const studentPos = new google.maps.LatLng(parseFloat(student.lat), parseFloat(student.lng));
+
+        // Try to find an existing close group
+        for (let group of groups) {
+          const groupPos = new google.maps.LatLng(group.lat, group.lng);
+          const distance = google.maps.geometry.spherical.computeDistanceBetween(studentPos, groupPos);
+          
+          if (distance <= threshold) {
+            group.members.push(student);
+            added = true;
+            break;
+          }
+        }
+
+        // If no close group found, create a new one
+        if (!added) {
+          groups.push({
+            lat: parseFloat(student.lat),
+            lng: parseFloat(student.lng),
+            members: [student]
+          });
+        }
+      });
+      return groups;
+    }
+
+    // --- 3. RENDERING MARKERS ---
+    function renderStudentMarkers(groups) {
+      // Clear old markers
+      studentMarkers.forEach(m => m.map = null);
+      studentMarkers = [];
+
+      groups.forEach(group => {
+        const position = { lat: group.lat, lng: group.lng };
+        let markerContent;
+        let marker;
+
+        if (group.members.length > 1) {
+          // --- MULTIPLE STUDENTS (Blue Circle with Count) ---
+          const div = document.createElement("div");
+          div.className = "group-marker";
+          div.textContent = group.members.length;
+          markerContent = div;
+
+          marker = new AdvancedMarkerElement({
+            map: map,
+            position: position,
+            content: markerContent,
+            title: "Students Group"
+          });
+
+          // Add Click Listener to show names
+          marker.addListener("click", () => {
+            let listHtml = `<div class="student-list-popup"><h4>الطلاب (${group.members.length})</h4><ul>`;
+            group.members.forEach(m => {
+              listHtml += `<li>${m.name}</li>`;
+            });
+            listHtml += `</ul></div>`;
+            
+            infoWindow.setContent(listHtml);
+            infoWindow.open(map, marker);
+          });
+
+        } else {
+          // --- SINGLE STUDENT (Green Pin) ---
+          const pin = new PinElement({ background: "#00c853", glyphColor: "white" });
+          markerContent = pin.element;
+          
+          marker = new AdvancedMarkerElement({
+            map: map,
+            position: position,
+            content: markerContent,
+            title: group.members[0].name
+          });
+        }
+        
+        studentMarkers.push(marker);
+      });
+    }
+
+    // --- 4. ANIMATION & UPDATES ---
     function animateMarker(marker, targetLat, targetLng) {
+      // ... (Same animation logic as before) ...
       const startPos = marker.position;
       const startLat = (typeof startPos.lat === 'function') ? startPos.lat() : startPos.lat;
       const startLng = (typeof startPos.lng === 'function') ? startPos.lng() : startPos.lng;
-
       const startTime = performance.now();
       const duration = 2000; 
-
       if (animationFrameId) cancelAnimationFrame(animationFrameId);
-
       function step(currentTime) {
         const elapsed = currentTime - startTime;
         const progress = Math.min(elapsed / duration, 1);
         const currentLat = startLat + (targetLat - startLat) * progress;
         const currentLng = startLng + (targetLng - startLng) * progress;
-
         marker.position = { lat: currentLat, lng: currentLng };
-
-        if (progress < 1) {
-          animationFrameId = requestAnimationFrame(step);
-        } else {
-          animationFrameId = null;
-        }
+        if (progress < 1) animationFrameId = requestAnimationFrame(step);
+        else animationFrameId = null;
       }
       animationFrameId = requestAnimationFrame(step);
     }
 
-    // --- 3. RECENTER LOGIC ---
-    // Added 'forceFit' parameter. 
-    // If true (Button Click), we Zoom. If false (Live Update), we just Pan.
     function recenterView(forceFit = false) {
       if (!isMapInit || !map) return;
-      
       const bounds = new google.maps.LatLngBounds();
       let hasPoints = false;
 
@@ -135,7 +239,8 @@
         hasPoints = true;
       }
 
-      Object.values(studentMarkers).forEach(m => {
+      // Check the clustered markers
+      studentMarkers.forEach(m => {
         if (m.position) {
           bounds.extend(m.position);
           hasPoints = true;
@@ -143,27 +248,21 @@
       });
 
       if (hasPoints && forceFit) {
-        // 🔥 Only change ZOOM if explicitly requested (Button or First Load)
         map.fitBounds(bounds, { top: 50, bottom: 50, left: 50, right: 50 });
       } else if (busMarker && !isUserPanned) {
-        // 🔥 Otherwise, just PAN to the bus (Smoother, no zooming)
         map.panTo(busMarker.position);
       }
     }
 
-    // --- 4. BRIDGE FUNCTION ---
     window.handleDirectUpdate = function(lat, lng) {
       updateBusUI({ lat: lat, lng: lng });
     };
 
-    // --- 5. UI UPDATE LOGIC ---
     function updateBusUI(data) {
       if (!isMapInit) return;
-      
       const lat = parseFloat(data.lat);
       const lng = parseFloat(data.lng);
       if (isNaN(lat) || isNaN(lng)) return;
-      
       const busPos = { lat, lng };
 
       if (!busMarker) {
@@ -171,7 +270,6 @@
         const container = document.createElement('div');
         container.className = 'bus-marker-container';
         container.appendChild(busPin.element);
-
         busMarker = new AdvancedMarkerElement({
           map: map,
           position: busPos,
@@ -181,33 +279,23 @@
       } else {
         animateMarker(busMarker, lat, lng);
       }
-
-      if (!isUserPanned) {
-        // 🔥 Call with FALSE so we don't Zoom, we only Pan
-        recenterView(false); 
-      }
+      if (!isUserPanned) recenterView(false); 
     }
 
-    // --- 6. MESSAGE LISTENERS ---
+    // --- 5. MESSAGE LISTENERS ---
     window.addEventListener("message", async (event) => {
       const data = event.data;
       if (!data || !isMapInit) return;
 
       if (data.action === "initParentMap") {
         const myMarkers = data.myMarkers || [];
-        myMarkers.forEach(m => {
-          const pos = { lat: parseFloat(m.lat), lng: parseFloat(m.lng) };
-          if (!studentMarkers[m.id]) {
-            const pin = new PinElement({ background: "#00c853", glyphColor: "white" });
-            studentMarkers[m.id] = new AdvancedMarkerElement({
-              map: map,
-              position: pos,
-              content: pin.element,
-              title: m.name
-            });
-          }
-        });
-        // On first load, we DO want to Zoom/Fit
+        
+        // 🔥 STEP 1: Group students by distance
+        const groups = groupStudents(myMarkers);
+        
+        // 🔥 STEP 2: Render the groups
+        renderStudentMarkers(groups);
+
         recenterView(true); 
       }
 
