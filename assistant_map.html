@@ -235,22 +235,9 @@
     let locationWatchId = null;
 
     function startLocationTracking() {
-        if (!navigator.geolocation) {
-            console.log("❌ Geolocation not supported");
-            return;
-        }
-        if (locationWatchId !== null) {
-            navigator.geolocation.clearWatch(locationWatchId);
-            locationWatchId = null;
-        }
-        const options = { enableHighAccuracy: true, maximumAge: 0, timeout: 10000 };
-
-        // Listen to Browser GPS (for testing/backup)
-        locationWatchId = navigator.geolocation.watchPosition((pos) => {
-             processLocationUpdate(pos.coords.latitude, pos.coords.longitude);
-        }, (err) => {
-            console.warn(`⚠️ GPS Error (${err.code}): ${err.message}`);
-        }, options);
+        // 🟢 DISABLED TO PREVENT THE DOUBLE PERMISSION POP-UP!
+        // The map now relies 100% on Flutter sending the GPS coordinates natively in the background.
+        console.log("✅ Native Flutter GPS mode active (Browser GPS disabled)");
     }
 
     // =========================================================
