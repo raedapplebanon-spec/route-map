@@ -2,51 +2,51 @@
 <html lang="ar" dir="rtl">
 <head>
   <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>Parent Tracking Map</title>
   <style>
-    html, body, #map { height: 100%; margin: 0; padding: 0; font-family: 'Segoe UI', sans-serif; }
+    html, body, #map { height: 100%; margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
     
     .bus-marker-container { pointer-events: none; }
 
-    /* Style for the Group Marker (when students are close) */
+    /* 🟢 2. FIX: Larger Group Marker for Touch Screens (40px instead of 30px) */
     .group-marker {
       background-color: #1a73e8; /* Google Blue */
       color: white;
       border-radius: 50%;
-      width: 30px;
-      height: 30px;
+      width: 40px; 
+      height: 40px;
       display: flex;
       align-items: center;
       justify-content: center;
       font-weight: bold;
-      border: 2px solid white;
-      box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+      font-size: 16px;
+      border: 3px solid white;
+      box-shadow: 0 3px 6px rgba(0,0,0,0.4);
       cursor: pointer;
     }
 
-    /* Style for the Popup List */
-    .student-list-popup {
-      padding: 5px;
-      text-align: right; /* RTL alignment */
-    }
-    .student-list-popup h4 { margin: 0 0 5px 0; font-size: 14px; color: #333; }
-    .student-list-popup ul { margin: 0; padding-right: 20px; }
-    .student-list-popup li { font-size: 13px; margin-bottom: 2px; }
+    .student-list-popup { padding: 8px; text-align: right; min-width: 120px; }
+    .student-list-popup h4 { margin: 0 0 8px 0; font-size: 15px; color: #1a73e8; border-bottom: 1px solid #eee; padding-bottom: 4px; }
+    .student-list-popup ul { margin: 0; padding-right: 20px; list-style-type: disc; }
+    .student-list-popup li { font-size: 14px; margin-bottom: 4px; color: #333; font-weight: 600;}
 
+    /* Modern Button Styling */
     .custom-map-control {
       background-color: #fff;
       border: 0;
-      border-radius: 8px;
+      border-radius: 20px;
       box-shadow: 0 2px 6px rgba(0,0,0,.3);
       cursor: pointer;
-      margin: 10px;
-      padding: 8px 12px;
+      margin: 15px;
+      padding: 10px 16px;
       font-size: 14px;
       font-weight: bold;
       color: #1a73e8;
       display: flex;
       align-items: center;
-      gap: 5px;
+      gap: 6px;
+      transition: background-color 0.2s;
     }
     .custom-map-control:hover { background-color: #f8f9fa; }
   </style>
@@ -58,21 +58,25 @@
   <script>
     let map;
     let busMarker;
-    let studentMarkers = []; // Changed to array to manage clusters easier
-    let infoWindow; // For showing the names
+    let studentMarkers = []; 
+    let infoWindow; 
     let isMapInit = false;
     let AdvancedMarkerElement, PinElement;
     
-    // Animation Variables
     let animationFrameId = null; 
     let isUserPanned = false;
+
+    // 🟢 5. FIX: Clean Map Style (Hides Businesses, Parks, etc. to focus on roads)
+    const cleanMapStyle = [
+      { featureType: "poi", elementType: "labels", stylers: [{ visibility: "off" }] },
+      { featureType: "transit", elementType: "labels", stylers: [{ visibility: "off" }] }
+    ];
 
     // --- 1. INITIALIZATION ---
     async function initMap() {
       try {
         const { Map } = await google.maps.importLibrary("maps");
         const markerLib = await google.maps.importLibrary("marker");
-        // Ensure geometry library is loaded for distance calculation
         await google.maps.importLibrary("geometry"); 
 
         AdvancedMarkerElement = markerLib.AdvancedMarkerElement;
@@ -82,26 +86,24 @@
           center: { lat: 33.8938, lng: 35.5018 },
           zoom: 15,
           mapId: "48c2bb983bd19c1c44d95cb7",
-          disableDefaultUI: false, 
-          mapTypeControl: true,
-          zoomControl: true,
-          streetViewControl: false,
-          fullscreenControl: false
+          disableDefaultUI: true, // Keep it clean
+          zoomControl: true, // Allow zoom
+          styles: cleanMapStyle // Apply the clean style
         });
 
-        // Initialize one shared InfoWindow
         infoWindow = new google.maps.InfoWindow();
 
         // RECENTER BUTTON
         const recenterBtn = document.createElement("button");
-        recenterBtn.innerHTML = "🎯 إعادة ضبط العرض";
+        recenterBtn.innerHTML = "🎯 إعادة التوجيه";
         recenterBtn.classList.add("custom-map-control");
         recenterBtn.addEventListener("click", () => {
           isUserPanned = false;
           recenterView(true); 
         });
 
-        map.controls[google.maps.ControlPosition.RIGHT_BOTTOM].push(recenterBtn);
+        // Add button to top right to avoid Bottom Sheet collisions
+        map.controls[google.maps.ControlPosition.TOP_RIGHT].push(recenterBtn);
 
         // Detect dragging
         map.addListener("dragstart", () => { isUserPanned = true; });
@@ -130,7 +132,6 @@
         let added = false;
         const studentPos = new google.maps.LatLng(parseFloat(student.lat), parseFloat(student.lng));
 
-        // Try to find an existing close group
         for (let group of groups) {
           const groupPos = new google.maps.LatLng(group.lat, group.lng);
           const distance = google.maps.geometry.spherical.computeDistanceBetween(studentPos, groupPos);
@@ -142,7 +143,6 @@
           }
         }
 
-        // If no close group found, create a new one
         if (!added) {
           groups.push({
             lat: parseFloat(student.lat),
@@ -156,7 +156,6 @@
 
     // --- 3. RENDERING MARKERS ---
     function renderStudentMarkers(groups) {
-      // Clear old markers
       studentMarkers.forEach(m => m.map = null);
       studentMarkers = [];
 
@@ -166,7 +165,7 @@
         let marker;
 
         if (group.members.length > 1) {
-          // --- MULTIPLE STUDENTS (Blue Circle with Count) ---
+          // GROUP MARKER
           const div = document.createElement("div");
           div.className = "group-marker";
           div.textContent = group.members.length;
@@ -176,14 +175,14 @@
             map: map,
             position: position,
             content: markerContent,
-            title: "Students Group"
+            title: "مجموعة طلاب"
           });
 
-          // Add Click Listener to show names
           marker.addListener("click", () => {
             let listHtml = `<div class="student-list-popup"><h4>الطلاب (${group.members.length})</h4><ul>`;
             group.members.forEach(m => {
-              listHtml += `<li>${m.name}</li>`;
+              // Ensure name exists, fallback to 'طالب'
+              listHtml += `<li>${m.name || m.displayName || 'طالب'}</li>`;
             });
             listHtml += `</ul></div>`;
             
@@ -192,15 +191,19 @@
           });
 
         } else {
-          // --- SINGLE STUDENT (Green Pin) ---
-          const pin = new PinElement({ background: "#00c853", glyphColor: "white" });
+          // 🟢 2. FIX: Scaled Student Pin (scale: 1.2 makes it larger)
+          const pin = new PinElement({ 
+            background: "#00c853", 
+            glyphColor: "white",
+            scale: 1.2
+          });
           markerContent = pin.element;
           
           marker = new AdvancedMarkerElement({
             map: map,
             position: position,
             content: markerContent,
-            title: group.members[0].name
+            title: group.members[0].name || group.members[0].displayName
           });
         }
         
@@ -210,21 +213,33 @@
 
     // --- 4. ANIMATION & UPDATES ---
     function animateMarker(marker, targetLat, targetLng) {
-      // ... (Same animation logic as before) ...
       const startPos = marker.position;
       const startLat = (typeof startPos.lat === 'function') ? startPos.lat() : startPos.lat;
       const startLng = (typeof startPos.lng === 'function') ? startPos.lng() : startPos.lng;
+      
       const startTime = performance.now();
-      const duration = 2000; 
+      // 🟢 5. FIX: Animation matches DB Throttler (3 seconds = 2800ms to allow reset)
+      const duration = 2800; 
+
       if (animationFrameId) cancelAnimationFrame(animationFrameId);
+      
       function step(currentTime) {
         const elapsed = currentTime - startTime;
         const progress = Math.min(elapsed / duration, 1);
-        const currentLat = startLat + (targetLat - startLat) * progress;
-        const currentLng = startLng + (targetLng - startLng) * progress;
+        
+        // Easing function for smoother sliding
+        const easeProgress = progress * (2 - progress); 
+
+        const currentLat = startLat + (targetLat - startLat) * easeProgress;
+        const currentLng = startLng + (targetLng - startLng) * easeProgress;
+        
         marker.position = { lat: currentLat, lng: currentLng };
-        if (progress < 1) animationFrameId = requestAnimationFrame(step);
-        else animationFrameId = null;
+        
+        if (progress < 1) {
+          animationFrameId = requestAnimationFrame(step);
+        } else {
+          animationFrameId = null;
+        }
       }
       animationFrameId = requestAnimationFrame(step);
     }
@@ -239,7 +254,6 @@
         hasPoints = true;
       }
 
-      // Check the clustered markers
       studentMarkers.forEach(m => {
         if (m.position) {
           bounds.extend(m.position);
@@ -248,7 +262,17 @@
       });
 
       if (hasPoints && forceFit) {
-        map.fitBounds(bounds, { top: 50, bottom: 50, left: 50, right: 50 });
+        // 🟢 4. FIX: Bottom Padding 150px to prevent the BottomSheet from hiding markers
+        map.fitBounds(bounds, { top: 80, bottom: 150, left: 50, right: 50 });
+        
+        // 🟢 3. FIX: Smart Zoom - Prevent extreme zooming if bounds are too small
+        const listener = google.maps.event.addListener(map, "idle", function() {
+          if (map.getZoom() > 17) {
+            map.setZoom(17);
+          }
+          google.maps.event.removeListener(listener);
+        });
+
       } else if (busMarker && !isUserPanned) {
         map.panTo(busMarker.position);
       }
@@ -266,19 +290,22 @@
       const busPos = { lat, lng };
 
       if (!busMarker) {
-        const busPin = new PinElement({ background: "#FBBC04", glyphText: "🚌" });
+        // 🟢 2. FIX: Bus Icon scaled to 1.6 to make it very clear
+        const busPin = new PinElement({ background: "#FBBC04", glyphText: "🚌", scale: 1.6 });
         const container = document.createElement('div');
         container.className = 'bus-marker-container';
         container.appendChild(busPin.element);
+        
         busMarker = new AdvancedMarkerElement({
           map: map,
           position: busPos,
           content: container,
-          zIndex: 1000
+          zIndex: 1000 // Ensure bus is always on top
         });
       } else {
         animateMarker(busMarker, lat, lng);
       }
+      
       if (!isUserPanned) recenterView(false); 
     }
 
@@ -289,13 +316,8 @@
 
       if (data.action === "initParentMap") {
         const myMarkers = data.myMarkers || [];
-        
-        // 🔥 STEP 1: Group students by distance
         const groups = groupStudents(myMarkers);
-        
-        // 🔥 STEP 2: Render the groups
         renderStudentMarkers(groups);
-
         recenterView(true); 
       }
 
