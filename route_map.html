@@ -62,39 +62,84 @@
     }
 
     // 🔥 MODIFIED: Preserves stopOrder during grouping
-    function groupCloseLocations(stops, tolerance = 15) {
-      const clusters = [];
-      stops.forEach(stop => {
-        let placed = false;
-        for (const c of clusters) {
-          const d = haversineDistance(c.lat, c.lng, parseFloat(stop.lat), parseFloat(stop.lng));
-          if (d < tolerance) {
-            c.items.push(stop);
-            // If any item in the group is a Start/End/Assistant, the Group inherits that trait
-            if (stop.isStart === true) c.isStart = true;
-            if (stop.isFinal === true) c.isFinal = true;
-            if (stop.stopType === 'assistant') c.stopType = 'assistant';
-            
-            // Keep track of the lowest order in this group (for sorting later)
-            if (stop.stopOrder !== undefined && stop.stopOrder !== 0) {
-                 c.minOrder = Math.min(c.minOrder || 9999, stop.stopOrder);
-            }
-            placed = true; break;
-          }
+  
+  function groupCloseLocations(stops, tolerance = 15) {
+    const clusters = [];
+
+    const isPassengerStop = (stop) =>
+      stop &&
+      stop.isStart !== true &&
+      stop.isFinal !== true &&
+      stop.stopType !== 'assistant';
+
+    stops.forEach(stop => {
+      let placed = false;
+
+      for (const c of clusters) {
+        const d = haversineDistance(
+          c.lat,
+          c.lng,
+          parseFloat(stop.lat),
+          parseFloat(stop.lng)
+        );
+
+        if (d >= tolerance) continue;
+
+        const clusterIsAssistant = c.stopType === 'assistant';
+        const stopIsAssistant = stop.stopType === 'assistant';
+
+        const clusterIsStart = c.isStart === true;
+        const stopIsStart = stop.isStart === true;
+
+        const clusterIsFinal = c.isFinal === true;
+        const stopIsFinal = stop.isFinal === true;
+
+        const clusterIsPassenger = isPassengerStop(c.items[0]);
+        const stopIsPassenger = isPassengerStop(stop);
+
+        // ✅ assistant must stay alone
+        if (clusterIsAssistant || stopIsAssistant) {
+          continue;
         }
-        if (!placed) {
-          clusters.push({
-            lat: parseFloat(stop.lat), lng: parseFloat(stop.lng),
-            items: [stop], 
-            isStart: stop.isStart === true, 
-            isFinal: stop.isFinal === true, 
-            stopType: stop.stopType,
-            minOrder: (stop.stopOrder && stop.stopOrder !== 0) ? stop.stopOrder : 9999
-          });
+
+        // ✅ start/end must stay alone
+        if (clusterIsStart || stopIsStart || clusterIsFinal || stopIsFinal) {
+          continue;
         }
-      });
-      return clusters;
-    }
+
+        // ✅ only passengers can merge with passengers
+        if (!(clusterIsPassenger && stopIsPassenger)) {
+          continue;
+        }
+
+        // merge passenger into passenger cluster
+        c.items.push(stop);
+
+        if (stop.stopOrder !== undefined && stop.stopOrder !== 0) {
+          c.minOrder = Math.min(c.minOrder || 9999, stop.stopOrder);
+        }
+
+        placed = true;
+        break;
+      }
+
+      if (!placed) {
+        clusters.push({
+          lat: parseFloat(stop.lat),
+          lng: parseFloat(stop.lng),
+          items: [stop],
+          isStart: stop.isStart === true,
+          isFinal: stop.isFinal === true,
+          stopType: stop.stopType,
+          minOrder:
+            stop.stopOrder && stop.stopOrder !== 0 ? stop.stopOrder : 9999
+        });
+      }
+    });
+
+    return clusters;
+  }
+
 
     function updateRouteSummary(km, minutes) {
       const summaryBox = document.getElementById("route-summary");
