@@ -88,7 +88,9 @@
           mapId: "48c2bb983bd19c1c44d95cb7",
           disableDefaultUI: true, // Keep it clean
           zoomControl: true, // Allow zoom
-          styles: cleanMapStyle // Apply the clean style
+          styles: cleanMapStyle, // Apply the clean style
+          // 🟢 THE FIX: Forces the map to steal all swipes, preventing the Bottom Sheet from closing!
+          gestureHandling: "greedy"
         });
 
         infoWindow = new google.maps.InfoWindow();
@@ -218,8 +220,10 @@
       const startLng = (typeof startPos.lng === 'function') ? startPos.lng() : startPos.lng;
       
       const startTime = performance.now();
-      // 🟢 5. FIX: Animation matches DB Throttler (3 seconds = 2800ms to allow reset)
-      const duration = 2800; 
+      
+      // 🟢 THE FIX: Lowered to 800ms. The bus will smoothly glide to the new spot 
+      // BEFORE the next database update arrives.
+      const duration = 800; 
 
       if (animationFrameId) cancelAnimationFrame(animationFrameId);
       
@@ -309,12 +313,19 @@
       if (!isUserPanned) recenterView(false); 
     }
 
+    // 🟢 NEW SHIELD: Prevent re-initializing if it's already done
+    let hasLoadedStudents = false; 
+
     // --- 5. MESSAGE LISTENERS ---
     window.addEventListener("message", async (event) => {
       const data = event.data;
       if (!data || !isMapInit) return;
 
       if (data.action === "initParentMap") {
+        // 🟢 THE FIX: If Flutter accidentally sends this multiple times, ignore the duplicates!
+        if (hasLoadedStudents) return; 
+        hasLoadedStudents = true;
+
         const myMarkers = data.myMarkers || [];
         const groups = groupStudents(myMarkers);
         renderStudentMarkers(groups);
