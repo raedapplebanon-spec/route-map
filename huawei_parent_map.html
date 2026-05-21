@@ -102,7 +102,7 @@
         });
 
         // Detect user drag to stop auto-recentering
-        map.addListener("dragstart", () => { isUserPanned = true; });
+        map.on("dragstart", () => { isUserPanned = true; });
 
         isMapInit = true;
         console.log("✅ Huawei Parent Map Ready");
