@@ -93,7 +93,7 @@
           navigationControl: false
         });
 
-        infoWindow = new HWMapJsSDK.HWInfoWindow();
+        infoWindow = new HWMapJsSDK.HWInfoWindow({ map: map });
 
         // Bind Recenter Button
         document.getElementById("recenterBtn").addEventListener("click", () => {
