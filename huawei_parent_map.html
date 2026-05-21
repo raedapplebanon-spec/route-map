@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Parent Tracking Map (Huawei)</title>
+  <style>
+    html, body, #map { height: 100%; margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+    
+    .student-list-popup { padding: 8px; text-align: right; min-width: 120px; }
+    .student-list-popup h4 { margin: 0 0 8px 0; font-size: 15px; color: #1a73e8; border-bottom: 1px solid #eee; padding-bottom: 4px; }
+    .student-list-popup ul { margin: 0; padding-right: 20px; list-style-type: disc; }
+    .student-list-popup li { font-size: 14px; margin-bottom: 4px; color: #333; font-weight: 600;}
+
+    /* 🟢 Absolute Positioning for Huawei since it doesn't use Google's Control Arrays */
+    .custom-map-control {
+      background-color: #fff;
+      border: 0;
+      border-radius: 20px;
+      box-shadow: 0 2px 6px rgba(0,0,0,.3);
+      cursor: pointer;
+      position: absolute;
+      top: 15px;
+      right: 15px;
+      z-index: 1000;
+      padding: 10px 16px;
+      font-size: 14px;
+      font-weight: bold;
+      color: #1a73e8;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      transition: background-color 0.2s;
+    }
+    .custom-map-control:hover { background-color: #f8f9fa; }
+  </style>
+</head>
+<body>
+
+  <div id="map"></div>
+  
+  <!-- Re-center Button placed outside the map logic for cross-compatibility -->
+  <button id="recenterBtn" class="custom-map-control">🎯 إعادة التوجيه</button>
+
+  <script>
+    let map;
+    let busMarker;
+    let studentMarkers = []; 
+    let infoWindow; 
+    let isMapInit = false;
+    let animationFrameId = null; 
+    let isUserPanned = false;
+
+    // 🟢 1. FIX: Mathematical Distance function replacing Google's Geometry library
+    function computeDistanceBetween(lat1, lon1, lat2, lon2) {
+      const R = 6371e3; 
+      const toRad = (val) => val * Math.PI / 180;
+      const dLat = toRad(lat2 - lat1);
+      const dLon = toRad(lon2 - lon1);
+      const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+                Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) *
+                Math.sin(dLon/2) * Math.sin(dLon/2);
+      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+      return R * c; 
+    }
+
+    // 🟢 2. FIX: Dynamic SVG Icons replacing AdvancedMarkerElement
+    function createGroupIcon(count) {
+      const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40"><circle cx="20" cy="20" r="18" fill="#1a73e8" stroke="white" stroke-width="3"/><text x="20" y="25" font-family="Arial" font-size="16" font-weight="bold" fill="white" text-anchor="middle">${count}</text></svg>`;
+      return "data:image/svg+xml;charset=UTF-8," + encodeURIComponent(svg);
+    }
+    
+    function createStudentIcon() {
+      const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="30" height="30"><path d="M15 0C9.486 0 5 4.486 5 10c0 7.5 10 20 10 20s10-12.5 10-20c0-5.514-4.486-10-10-10zm0 14.5c-2.481 0-4.5-2.019-4.5-4.5S12.519 5 15 5s4.5 2.019 4.5 4.5-2.019 4.5-4.5 4.5z" fill="#00c853"/></svg>`;
+      return "data:image/svg+xml;charset=UTF-8," + encodeURIComponent(svg);
+    }
+
+    function createBusIcon() {
+      const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="45" height="45"><circle cx="22.5" cy="22.5" r="20" fill="#FBBC04" stroke="white" stroke-width="2"/><text x="22.5" y="29" font-family="Arial" font-size="18" text-anchor="middle">🚌</text></svg>`;
+      return "data:image/svg+xml;charset=UTF-8," + encodeURIComponent(svg);
+    }
+
+    // --- INITIALIZATION ---
+    function initMap() {
+      try {
+        // Initialize Huawei Map
+        map = new HWMapJsSDK.HWMap(document.getElementById("map"), {
+          center: { lat: 33.8938, lng: 35.5018 },
+          zoom: 15,
+          language: "AR",
+          zoomControl: false,
+          scaleControl: false,
+          navigationControl: false
+        });
+
+        infoWindow = new HWMapJsSDK.HWInfoWindow();
+
+        // Bind Recenter Button
+        document.getElementById("recenterBtn").addEventListener("click", () => {
+          isUserPanned = false;
+          recenterView(true); 
+        });
+
+        // Detect user drag to stop auto-recentering
+        map.addListener("dragstart", () => { isUserPanned = true; });
+
+        isMapInit = true;
+        console.log("✅ Huawei Parent Map Ready");
+
+        const readyPayload = { action: "mapIsReady" };
+        if (window.chrome && window.chrome.webview) {
+            window.chrome.webview.postMessage(readyPayload);
+        } else if (window.parent) {
+            window.parent.postMessage(readyPayload, "*");
+        }
+      } catch (e) {
+        console.error("❌ Huawei Init Error: ", e);
+      }
+    }
+
+    // --- CLUSTERING LOGIC ---
+    function groupStudents(students) {
+      const groups = [];
+      const threshold = 20; 
+
+      students.forEach(student => {
+        let added = false;
+        for (let group of groups) {
+          const distance = computeDistanceBetween(student.lat, student.lng, group.lat, group.lng);
+          if (distance <= threshold) {
+            group.members.push(student);
+            added = true;
+            break;
+          }
+        }
+        if (!added) {
+          groups.push({ lat: parseFloat(student.lat), lng: parseFloat(student.lng), members: [student] });
+        }
+      });
+      return groups;
+    }
+
+    // --- RENDERING MARKERS ---
+    function renderStudentMarkers(groups) {
+      studentMarkers.forEach(m => m.setMap(null));
+      studentMarkers = [];
+
+      groups.forEach(group => {
+        const position = { lat: group.lat, lng: group.lng };
+        let markerIcon = group.members.length > 1 
+            ? createGroupIcon(group.members.length) 
+            : createStudentIcon();
+
+        const marker = new HWMapJsSDK.HWMarker({
+          map: map,
+          position: position,
+          icon: markerIcon
+        });
+
+        if (group.members.length > 1) {
+          marker.addListener("click", () => {
+            let listHtml = `<div class="student-list-popup"><h4>الطلاب (${group.members.length})</h4><ul>`;
+            group.members.forEach(m => {
+              listHtml += `<li>${m.name || m.displayName || 'طالب'}</li>`;
+            });
+            listHtml += `</ul></div>`;
+            infoWindow.setContent(listHtml);
+            infoWindow.setPosition(position);
+            infoWindow.open(map);
+          });
+        }
+        
+        studentMarkers.push(marker);
+      });
+    }
+
+    // --- ANIMATION & UPDATES ---
+    function animateMarker(marker, targetLat, targetLng) {
+      const startLat = marker.getPosition().lat;
+      const startLng = marker.getPosition().lng;
+      
+      const startTime = performance.now();
+      const duration = 800; 
+
+      if (animationFrameId) cancelAnimationFrame(animationFrameId);
+      
+      function step(currentTime) {
+        const elapsed = currentTime - startTime;
+        const progress = Math.min(elapsed / duration, 1);
+        const easeProgress = progress * (2 - progress); 
+
+        const currentLat = startLat + (targetLat - startLat) * easeProgress;
+        const currentLng = startLng + (targetLng - startLng) * easeProgress;
+        
+        marker.setPosition({ lat: currentLat, lng: currentLng });
+        
+        if (progress < 1) {
+          animationFrameId = requestAnimationFrame(step);
+        } else {
+          animationFrameId = null;
+        }
+      }
+      animationFrameId = requestAnimationFrame(step);
+    }
+
+    function recenterView(forceFit = false) {
+      if (!isMapInit || !map) return;
+      
+      let minLat = 90, maxLat = -90;
+      let minLng = 180, maxLng = -180;
+      let hasPoints = false;
+
+      function updateBounds(pos) {
+        minLat = Math.min(minLat, pos.lat);
+        maxLat = Math.max(maxLat, pos.lat);
+        minLng = Math.min(minLng, pos.lng);
+        maxLng = Math.max(maxLng, pos.lng);
+        hasPoints = true;
+      }
+
+      if (busMarker && busMarker.getPosition()) {
+        updateBounds(busMarker.getPosition());
+      }
+
+      studentMarkers.forEach(m => {
+        if (m.getPosition()) updateBounds(m.getPosition());
+      });
+
+      if (hasPoints && forceFit) {
+        let latDiff = (maxLat - minLat) || 0.01;
+        let lngDiff = (maxLng - minLng) || 0.01;
+        
+        // Center dynamically based on points
+        map.setCenter({ lat: (minLat + maxLat) / 2, lng: (minLng + maxLng) / 2 });
+        map.setZoom((latDiff < 0.005 && lngDiff < 0.005) ? 16 : 14);
+      } else if (busMarker && !isUserPanned) {
+        map.setCenter(busMarker.getPosition());
+      }
+    }
+
+    window.handleDirectUpdate = function(lat, lng) {
+      updateBusUI({ lat: lat, lng: lng });
+    };
+
+    function updateBusUI(data) {
+      if (!isMapInit) return;
+      const lat = parseFloat(data.lat);
+      const lng = parseFloat(data.lng);
+      if (isNaN(lat) || isNaN(lng)) return;
+      const busPos = { lat, lng };
+
+      if (!busMarker) {
+        busMarker = new HWMapJsSDK.HWMarker({
+          map: map,
+          position: busPos,
+          icon: createBusIcon(),
+          zIndex: 1000
+        });
+      } else {
+        animateMarker(busMarker, lat, lng);
+      }
+      
+      if (!isUserPanned) recenterView(false); 
+    }
+
+    let hasLoadedStudents = false; 
+
+    // --- MESSAGE LISTENERS ---
+    window.addEventListener("message", async (event) => {
+      const data = event.data;
+      if (!data || !isMapInit) return;
+
+      if (data.action === "initParentMap") {
+        if (hasLoadedStudents) return; 
+        hasLoadedStudents = true;
+        const myMarkers = data.myMarkers || [];
+        const groups = groupStudents(myMarkers);
+        renderStudentMarkers(groups);
+        recenterView(true); 
+      }
+
+      if (data.action === "updateBusLocation") {
+        updateBusUI(data);
+      }
+    });
+  </script>
+
+  <!-- 🔴 IMPORTANT: Put your Huawei Map Kit API Key Here! -->
+  <script src="https://mapapi.cloud.huawei.com/mapjs/v1/api/js?callback=initMap&key=YOUR_HUAWEI_API_KEY" async defer></script>
+</body>
+</html>
