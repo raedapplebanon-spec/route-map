@@ -25,7 +25,7 @@
     <div class="legend-row"><div class="legend-color" style="background:#00c853"></div><span>البداية</span></div>
     <div class="legend-row"><div class="legend-color" style="background:#d50000"></div><span>النهاية</span></div>
     <div class="legend-row"><div class="legend-color" style="background:#1a73e8"></div><span>ضمن الجولة</span></div>
-    <div class="legend-row"><div style="width: 14px; margin-left: 6px; text-align: center;">⚠️</div><span>يتطلب مشي > ٢٠م</span></div>
+    <div class="legend-row"><div style="width: 14px; margin-left: 6px; text-align: center;">⚠️</div><span>يتطلب مشي &gt; ٢٠م</span></div>
     <div class="legend-row"><div class="legend-color" style="background:#ff9100"></div><span>خارج الجولة</span></div>
   </div>
 
@@ -44,6 +44,8 @@
     
     // Config Flags
     window.optimizerEnabled = false; // Default
+    window.currentRouteArray = [];
+    window.currentAvailableArray = [];
     
     let lastDataHash = ""; 
     let routeCalculationTimer = null;
@@ -51,6 +53,31 @@
     let mapReady = false;
     const MY_MAP_ID = "48c2bb983bd19c1c44d95cb7";
     const SNAP_THRESHOLD = 20; 
+
+    // 🔒 SECURITY FIX: Sanitize strings before inserting into HTML
+    function escapeHtml(str) {
+      if (str === null || str === undefined) return "";
+      return String(str)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+    }
+
+    function buildDataHash(routeArr, availArr) {
+      // If optimizer is enabled, ignore stopOrder changes in hash so sync-backs don't double-bill
+      const cleanRoute = routeArr.map(s => ({
+        ...s,
+        stopOrder: window.optimizerEnabled ? 0 : (s.stopOrder || 0)
+      }));
+      return JSON.stringify({
+        r: cleanRoute,
+        a: availArr,
+        opt: window.optimizerEnabled,
+        h: window.lastRouteHeader || {}
+      });
+    }
 
     function haversineDistance(lat1, lng1, lat2, lng2) {
       const R = 6371e3; 
@@ -61,99 +88,97 @@
       return 2 * R * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
     }
 
-    // 🔥 MODIFIED: Preserves stopOrder during grouping
-  
-  function groupCloseLocations(stops, tolerance = 15) {
-    const clusters = [];
+    // Preserves stopOrder during grouping
+    function groupCloseLocations(stops, tolerance = 15) {
+      const clusters = [];
 
-    const isPassengerStop = (stop) =>
-      stop &&
-      stop.isStart !== true &&
-      stop.isFinal !== true &&
-      stop.stopType !== 'assistant';
+      const isPassengerStop = (stop) =>
+        stop &&
+        stop.isStart !== true &&
+        stop.isFinal !== true &&
+        stop.stopType !== 'assistant';
 
-    stops.forEach(stop => {
-      let placed = false;
+      stops.forEach(stop => {
+        let placed = false;
 
-      for (const c of clusters) {
-        const d = haversineDistance(
-          c.lat,
-          c.lng,
-          parseFloat(stop.lat),
-          parseFloat(stop.lng)
-        );
+        for (const c of clusters) {
+          const d = haversineDistance(
+            c.lat,
+            c.lng,
+            parseFloat(stop.lat),
+            parseFloat(stop.lng)
+          );
 
-        if (d >= tolerance) continue;
+          if (d >= tolerance) continue;
 
-        const clusterIsAssistant = c.stopType === 'assistant';
-        const stopIsAssistant = stop.stopType === 'assistant';
+          const clusterIsAssistant = c.stopType === 'assistant';
+          const stopIsAssistant = stop.stopType === 'assistant';
 
-        const clusterIsStart = c.isStart === true;
-        const stopIsStart = stop.isStart === true;
+          const clusterIsStart = c.isStart === true;
+          const stopIsStart = stop.isStart === true;
 
-        const clusterIsFinal = c.isFinal === true;
-        const stopIsFinal = stop.isFinal === true;
+          const clusterIsFinal = c.isFinal === true;
+          const stopIsFinal = stop.isFinal === true;
 
-        const clusterIsPassenger = isPassengerStop(c.items[0]);
-        const stopIsPassenger = isPassengerStop(stop);
+          const clusterIsPassenger = isPassengerStop(c.items[0]);
+          const stopIsPassenger = isPassengerStop(stop);
 
-        // ✅ assistant must stay alone
-        if (clusterIsAssistant || stopIsAssistant) {
-          continue;
+          // assistant must stay alone
+          if (clusterIsAssistant || stopIsAssistant) {
+            continue;
+          }
+
+          // start/end must stay alone
+          if (clusterIsStart || stopIsStart || clusterIsFinal || stopIsFinal) {
+            continue;
+          }
+
+          // only passengers can merge with passengers
+          if (!(clusterIsPassenger && stopIsPassenger)) {
+            continue;
+          }
+
+          // merge passenger into passenger cluster
+          c.items.push(stop);
+
+          if (stop.stopOrder !== undefined && stop.stopOrder !== 0) {
+            c.minOrder = Math.min(c.minOrder || 9999, stop.stopOrder);
+          }
+
+          placed = true;
+          break;
         }
 
-        // ✅ start/end must stay alone
-        if (clusterIsStart || stopIsStart || clusterIsFinal || stopIsFinal) {
-          continue;
+        if (!placed) {
+          clusters.push({
+            lat: parseFloat(stop.lat),
+            lng: parseFloat(stop.lng),
+            items: [stop],
+            isStart: stop.isStart === true,
+            isFinal: stop.isFinal === true,
+            stopType: stop.stopType,
+            minOrder:
+              stop.stopOrder && stop.stopOrder !== 0 ? stop.stopOrder : 9999
+          });
         }
+      });
 
-        // ✅ only passengers can merge with passengers
-        if (!(clusterIsPassenger && stopIsPassenger)) {
-          continue;
-        }
-
-        // merge passenger into passenger cluster
-        c.items.push(stop);
-
-        if (stop.stopOrder !== undefined && stop.stopOrder !== 0) {
-          c.minOrder = Math.min(c.minOrder || 9999, stop.stopOrder);
-        }
-
-        placed = true;
-        break;
-      }
-
-      if (!placed) {
-        clusters.push({
-          lat: parseFloat(stop.lat),
-          lng: parseFloat(stop.lng),
-          items: [stop],
-          isStart: stop.isStart === true,
-          isFinal: stop.isFinal === true,
-          stopType: stop.stopType,
-          minOrder:
-            stop.stopOrder && stop.stopOrder !== 0 ? stop.stopOrder : 9999
-        });
-      }
-    });
-
-    return clusters;
-  }
-
+      return clusters;
+    }
 
     function updateRouteSummary(km, minutes) {
       const summaryBox = document.getElementById("route-summary");
       const summaryText = document.getElementById("summary-text");
       if (summaryBox && summaryText) {
         summaryBox.style.display = "block";
-        summaryText.innerHTML = "المسافة: <b>" + km + " كم</b><br>الوقت: <b>" + minutes + " دقيقة</b>";
+        summaryText.innerHTML = "المسافة: <b>" + escapeHtml(km) + " كم</b><br>الوقت: <b>" + escapeHtml(minutes) + " دقيقة</b>";
       }
     }
 
     window.initMap = async function() {
       try {
         const { Map } = await google.maps.importLibrary("maps");
-        const { AdvancedMarkerElement, PinElement } = await google.maps.importLibrary("marker");
+        await google.maps.importLibrary("marker");
         
         infoWindow = new google.maps.InfoWindow();
         map = new Map(document.getElementById("map"), {
@@ -182,7 +207,7 @@
             const place = autocomplete.getPlace();
             const searchText = (place.name || input.value || "").toLowerCase();
             const foundStudent = [...window.routeMarkers, ...window.availableMarkers].find(m => 
-                m.names.some(studentName => studentName.toLowerCase().includes(searchText))
+                m.names.some(studentName => (studentName || "").toLowerCase().includes(searchText))
             );
             if (foundStudent) {
                 map.setCenter({ lat: foundStudent.lat, lng: foundStudent.lng });
@@ -213,24 +238,32 @@
 
     // --- LISTENER (Input) ---
     window.addEventListener("message", function (event) {
-      if (!event.data || event.data.action !== "setRouteData") return;
+      if (!event.data) return;
+      let data = event.data;
+      if (typeof data === 'string') {
+        try { data = JSON.parse(data); } catch(e) { return; }
+      }
+      if (!data || data.action !== "setRouteData") return;
       
-      const routeData = event.data.routeData || [];
-      const availableData = event.data.availableData || [];
+      const routeData = data.routeData || [];
+      const availableData = data.availableData || [];
       
-      // ✅ 1. Update Global State
-      window.lastRouteHeader = event.data.routeHeader || { assistantLocationRequired: false, routeShift: "AM" };
-      window.optimizerEnabled = event.data.optimizerEnabled || false; // 🔥 Capture the Switch
+      // 1. Update Global State
+      window.lastRouteHeader = data.routeHeader || { assistantLocationRequired: false, routeShift: "AM" };
+      window.optimizerEnabled = data.optimizerEnabled || false;
 
       if (mapReady) window.setRouteData(routeData, availableData);
       else window.pendingData = { route: routeData, available: availableData };
     });
 
     window.setRouteData = function(routeArray, availableArray) {
-      // Data Hash check (Prevent Flashing)
-      const currentHash = JSON.stringify({ r: routeArray, a: availableArray, opt: window.optimizerEnabled });
+      // Data Hash check (Prevent Flashing & Double Billing)
+      const currentHash = buildDataHash(routeArray, availableArray);
       if (currentHash === lastDataHash) { console.log("🛑 Unchanged"); return; }
       lastDataHash = currentHash;
+
+      window.currentRouteArray = routeArray;
+      window.currentAvailableArray = availableArray;
 
       // Clear Map
       window.routeMarkers.forEach(obj => obj.marker.map = null);
@@ -253,8 +286,11 @@
 
       const generateStudentRows = (items) => {
           return items.map(x => {
-            let detailsText = (x.stopType === 'employee') ? "موظف" : `${x.gradeName || ""} - ${x.sectionName || ""}`;
-            return `<div style="margin-bottom:6px; border-bottom:1px solid #eee; padding-bottom:4px;"><b>${x.studentName || "اسم المستخدم"}</b><br><span style="font-size:12px; color:#555;">${detailsText}</span></div>`;
+            const safeName = escapeHtml(x.studentName || "اسم المستخدم");
+            const safeGrade = escapeHtml(x.gradeName || "");
+            const safeSection = escapeHtml(x.sectionName || "");
+            let detailsText = (x.stopType === 'employee') ? "موظف" : `${safeGrade} - ${safeSection}`;
+            return `<div style="margin-bottom:6px; border-bottom:1px solid #eee; padding-bottom:4px;"><b>${safeName}</b><br><span style="font-size:12px; color:#555;">${detailsText}</span></div>`;
           }).join('');
       };
 
@@ -268,7 +304,7 @@
         else if (cluster.stopType === 'assistant') { color = "#9C27B0"; initialText = "A"; headerTitle = "المساعد"; }
 
         let html = `<div style="color:black;text-align:right;direction:rtl;min-width:180px;"><b style="color:${color}; font-size:14px;">${headerTitle}</b><hr>${generateStudentRows(cluster.items)}</div>`;
-        window.routeMarkers.push(addMarker(pos, "route", html, color, initialText, cluster.items.map(x => x.studentName)));
+        window.routeMarkers.push(addMarker(pos, "route", html, color, initialText, cluster.items.map(x => x.studentName || "")));
       });
 
       // Render Available Pins
@@ -276,7 +312,7 @@
         const pos = { lat: cluster.lat, lng: cluster.lng };
         bounds.extend(pos);
         let html = `<div style="color:black;text-align:right;direction:rtl;min-width:180px;"><b style="color:#ff9100; font-size:14px;">خارج الجولة</b><hr>${generateStudentRows(cluster.items)}</div>`;
-        window.availableMarkers.push(addMarker(pos, "available", html, "#ff9100", cluster.items.length.toString(), cluster.items.map(x => x.studentName)));
+        window.availableMarkers.push(addMarker(pos, "available", html, "#ff9100", cluster.items.length.toString(), cluster.items.map(x => x.studentName || "")));
       });
 
       if (!bounds.isEmpty()) map.fitBounds(bounds);
@@ -290,7 +326,7 @@
       }
     };
 
-    // 🔥 THE BRAIN: Calculates route based on Mode (Auto/Manual)
+    // Calculates route based on Mode (Auto/Manual)
     function calculateRoadRoute(clusters) {
        let originCluster = clusters.find(c => c.isStart);
        let destinationCluster = clusters.find(c => c.isFinal);
@@ -310,9 +346,9 @@
        
        if (header.assistantLocationRequired && assistants.length > 0) {
            const assistantStop = assistants[0]; 
-           waypointsClusters = waypointsClusters.filter(c => c !== assistantStop); // Remove from middle
-           if (header.routeShift === "AM") originCluster = assistantStop; // Start here
-           else destinationCluster = assistantStop; // End here
+           waypointsClusters = waypointsClusters.filter(c => c !== assistantStop);
+           if (header.routeShift === "AM") originCluster = assistantStop;
+           else destinationCluster = assistantStop;
        }
 
        // 3. Prepare Google API Request
@@ -321,25 +357,21 @@
            stopover: true
        }));
 
-       // 🔥 4. Call Google
+       // 4. Call Google
        directionsService.route({
            origin: { lat: originCluster.lat, lng: originCluster.lng },
            destination: { lat: destinationCluster.lat, lng: destinationCluster.lng },
            waypoints: googleWaypoints, 
            travelMode: google.maps.TravelMode.DRIVING, 
-           // 🔥 SWITCH: Only optimize if enabled in Flutter
            optimizeWaypoints: window.optimizerEnabled, 
        }, (result, status) => {
            if (status === "OK") {
-               // ✅ RENDER & SEND BACK
-               // Note: If optimized, 'waypoint_order' tells us the new shuffle.
-               // If not optimized, 'waypoint_order' is just [0, 1, 2...]
                renderAndSync(originCluster, destinationCluster, waypointsClusters, result);
            }
        });
     }
 
-    // 🔥 THE MOUTH: Renders visuals AND sends order back to Dart
+    // Renders visuals AND sends order back to Dart
     function renderAndSync(start, end, originalWaypointClusters, result) {
         directionsRenderer.setDirections(result);
         
@@ -347,37 +379,27 @@
         const legs = result.routes[0].legs;
 
         // 1. Reorder our Cluster Array to match the Line
-        // (Google returns indices like [2, 0, 1]. We map that back to our objects)
         const sortedClusters = optimizedOrder.map(index => originalWaypointClusters[index]);
 
         // 2. Prepare the Payload for Flutter
         let updates = [];
-        let passengerOrderCounter = 1; // Start counting passengers from 1
+        let passengerOrderCounter = 1;
 
         sortedClusters.forEach(cluster => {
-            // Logic: Is this a passenger stop?
-            // Start/End are excluded. Assistant is excluded if used as Start/End.
-            // But here 'sortedClusters' ONLY contains the waypoints (middle pins).
-            // So we just need to check if it's NOT an assistant acting as a midpoint.
-            
-            // Actually, per your request: Assistant/School logic is external.
-            // We just number the stops in the route.
-            
-            // Loop through ALL items (students) in this stop
             cluster.items.forEach(student => {
-                 // 🔥 CRITICAL: Only update if we have an ID
                  if (student.locationId) {
+                     student.stopOrder = passengerOrderCounter;
                      updates.push({
                          locationId: student.locationId,
                          newOrder: passengerOrderCounter
                      });
                  }
             });
-            
-            // Only increment counter if this cluster actually had passengers
-            // (Skip if it was a weird empty stop, though unlikely)
             passengerOrderCounter++;
         });
+
+        // 🔒 Pre-update hash with the new stopOrders so when Flutter echoes the updated state back, we don't recalculate!
+        lastDataHash = buildDataHash(window.currentRouteArray, window.currentAvailableArray);
 
         // 3. Send Bridge Message
         sendOrdersToFlutter(updates);
@@ -396,40 +418,33 @@
         const msg = { action: "updateOrders", orders: updates };
         const jsonMsg = JSON.stringify(msg);
 
-        // Send to Mobile
-        if (window.FlutterChannel) window.FlutterChannel.postMessage(jsonMsg);
-        // Send to Web
-        window.parent.postMessage(jsonMsg, "*");
-        // Send to Windows
-        if (window.chrome && window.chrome.webview) window.chrome.webview.postMessage(jsonMsg);
+        // Send to Mobile (Support both channel names)
+        if (window.FlutterBridge) {
+          window.FlutterBridge.postMessage(jsonMsg);
+        } else if (window.FlutterChannel) {
+          window.FlutterChannel.postMessage(jsonMsg);
+        } else if (window.chrome && window.chrome.webview) {
+          // Send to Windows
+          window.chrome.webview.postMessage(jsonMsg);
+        } else {
+          // Send to Web
+          window.parent.postMessage(jsonMsg, "*");
+        }
     }
 
     function runSafetyAudit(sortedClusters, legs) {
         let visualCounter = 1;
-        // Logic: The legs array corresponds to the segments between waypoints.
-        // Leg 0: Start -> Waypoint 1
-        // Leg 1: Waypoint 1 -> Waypoint 2
-        
         sortedClusters.forEach((cluster, index) => {
-            // Find the visual marker object for this cluster
             const markerObj = window.routeMarkers.find(m => 
                 Math.abs(m.lat - cluster.lat) < 0.0001 && 
                 Math.abs(m.lng - cluster.lng) < 0.0001
             );
 
             if (markerObj && markerObj.pin) {
-                // Update visual number
                 if (!cluster.stopType || cluster.stopType !== 'assistant') {
                     markerObj.pin.glyphText = visualCounter.toString();
                     markerObj.marker.content = markerObj.pin.element;
                     visualCounter++;
-                }
-
-                // Calculate walking distance (Safety)
-                // Note: leg index usually matches waypoint index for the "End" of the leg
-                if (index < legs.length) {
-                    const snappedLoc = legs[index].end_location; // Approximation
-                     // (Precise matching is hard without complex leg logic, but this is usually close enough for visual warning)
                 }
             }
         });
