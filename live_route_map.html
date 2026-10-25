@@ -54,8 +54,14 @@
     let busMarker = null;
     let mapReady = false;
     
-    // Logic to prevent map from resetting zoom repeatedly
+    // Logic to prevent map from resetting zoom repeatedly, while allowing zoom on route switch
     let initialBoundsSet = false;
+    let currentRenderedRouteId = null;
+    let lastRoutePayloadString = "";
+
+    // Queues for messages that arrive before map finishes loading
+    let pendingRoutePoints = null;
+    let pendingBusData = null;
 
     // Libraries
     let AdvancedMarkerElement, PinElement;
@@ -63,6 +69,17 @@
     // Animation Globals
     let animationFrameId = null;
     const MY_MAP_ID = "48c2bb983bd19c1c44d95cb7"; 
+
+    // 🔒 SECURITY FIX: Escape HTML to prevent XSS in student names
+    function escapeHtml(str) {
+      if (str === null || str === undefined) return "";
+      return String(str)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+    }
 
     // =========================================================
     // 2. INITIALIZE MAP
@@ -78,8 +95,6 @@
           center: { lat: 31.9522, lng: 35.2332 }, 
           zoom: 12,
           mapId: MY_MAP_ID,
-          
-          // SATELLITE TOGGLE (Positioned Left Top)
           mapTypeControl: true, 
           mapTypeControlOptions: {
               style: google.maps.MapTypeControlStyle.DROPDOWN_MENU,
@@ -90,7 +105,6 @@
           zoomControlOptions: { position: google.maps.ControlPosition.RIGHT_TOP }
         });
 
-        // Setup UI
         map.controls[google.maps.ControlPosition.RIGHT_BOTTOM].push(document.getElementById("legend"));
         
         infoWindow = new google.maps.InfoWindow();
@@ -101,11 +115,22 @@
             polylineOptions: { strokeColor: "#1a73e8", strokeOpacity: 0.8, strokeWeight: 5 }
         });
 
-        // Signal Ready
         google.maps.event.addListenerOnce(map, 'tilesloaded', () => {
             document.getElementById("legend").style.display = "block";
             mapReady = true;
-            sendToFlutter("mapIsReady"); 
+            
+            // Process any data that arrived while map was still initializing
+            if (pendingRoutePoints) {
+              renderRouteOnMap(pendingRoutePoints);
+              pendingRoutePoints = null;
+            }
+            if (pendingBusData) {
+              updateBusUI(pendingBusData);
+              pendingBusData = null;
+            }
+
+            // Send object so Dart's event.data['action'] == 'mapIsReady' works
+            sendToFlutter({ action: "mapIsReady" }); 
         });
 
       } catch (e) { console.error("❌ Map Init Failed:", e); }
@@ -124,15 +149,23 @@
     window.addEventListener("message", function (event) {
         if (!event.data) return;
         let data = event.data;
-        if (typeof data === 'string') { try { data = JSON.parse(data); } catch(e){} }
+        if (typeof data === 'string') { try { data = JSON.parse(data); } catch(e){ return; } }
 
-        if (data.action === "setRouteData" && mapReady) {
+        if (data.action === "setRouteData") {
             const routePoints = (data.routesGrouped && data.routesGrouped.length > 0) 
                               ? data.routesGrouped[0].points : [];
+            if (!mapReady) {
+                pendingRoutePoints = routePoints;
+                return;
+            }
             renderRouteOnMap(routePoints);
         }
 
-        if (data.action === "updateBusLocation" && mapReady) {
+        if (data.action === "updateBusLocation") {
+            if (!mapReady) {
+                pendingBusData = data;
+                return;
+            }
             updateBusUI(data);
         }
     });
@@ -141,7 +174,10 @@
     // 5. LIVE BUS LOGIC
     // =========================================================
     function updateBusUI(data) {
-        if (!mapReady) return;
+        if (!mapReady) {
+            pendingBusData = data;
+            return;
+        }
         
         const lat = parseFloat(data.lat);
         const lng = parseFloat(data.lng);
@@ -196,19 +232,28 @@
     }
 
     // =========================================================
-    // 6. ROUTE RENDERING (With Logic to Preserve Zoom)
+    // 6. ROUTE RENDERING (With Deduplication & Smart Zoom)
     // =========================================================
     function renderRouteOnMap(points) {
         if (!points || points.length === 0) return;
 
+        // 🔒 Deduplicate: Do not re-bill Directions API if route points haven't changed
+        const currentPayloadString = JSON.stringify(points);
+        if (currentPayloadString === lastRoutePayloadString) {
+            return;
+        }
+        lastRoutePayloadString = currentPayloadString;
+
+        // If the user switched to a different routeId, allow fitBounds once for the new route
+        const incomingRouteId = points[0]?.routeId || "default";
+        if (incomingRouteId !== currentRenderedRouteId) {
+            initialBoundsSet = false;
+            currentRenderedRouteId = incomingRouteId;
+        }
+
         routeMarkers.forEach(m => m.map = null);
         routeMarkers = [];
-        
-        // NOTE: We do NOT clear directionsRenderer here immediately 
-        // to prevent flickering if the route hasn't changed.
 
-        const startPoint = points.find(p => p.isStart);
-        const endPoint = points.find(p => p.isFinal);
         const clusters = groupCloseLocations(points);
         const startCluster = clusters.find(c => c.isStart);
         const endCluster = clusters.find(c => c.isEnd);
@@ -252,8 +297,6 @@
                 if (status === "OK") {
                     directionsRenderer.setDirections(result);
                     
-                    // 🔥 ONLY FIT BOUNDS ONCE
-                    // This lets the user move the map freely after the initial load
                     if (!initialBoundsSet) {
                         const bounds = new google.maps.LatLngBounds();
                         bounds.union(result.routes[0].bounds);
@@ -274,9 +317,10 @@
             map: map, position: { lat: cluster.lat, lng: cluster.lng }, content: pin.element
         });
         
+        const safeNames = cluster.items.map(s => escapeHtml(s.studentName)).join('<br>');
         const contentString = `<div style="padding:5px; direction:rtl; text-align:right;">
-            <b style="color:${color}">${headerHtml}</b><br>
-            ${cluster.items.map(s => s.studentName).join('<br>')}
+            <b style="color:${color}">${escapeHtml(headerHtml)}</b><br>
+            ${safeNames}
         </div>`;
 
         marker.addListener("click", () => {
@@ -328,7 +372,6 @@
          });
          const bounds = new google.maps.LatLngBounds();
          clusters.forEach(c => bounds.extend({lat:c.lat, lng:c.lng}));
-         // Fallback fit if no route is drawn
          if (!initialBoundsSet) {
              map.fitBounds(bounds);
              initialBoundsSet = true;
@@ -338,7 +381,7 @@
     function sendToFlutter(payload) {
       const msg = typeof payload === 'string' ? payload : JSON.stringify(payload);
       if (window.FlutterChan) window.FlutterChan.postMessage(msg);
-      else window.parent.postMessage(msg, "*");
+      else window.parent.postMessage(payload, "*");
     }
   </script>
 </body>
