@@ -66,6 +66,21 @@
     let animationFrameId = null; 
     let isUserPanned = false;
 
+    // 🔒 Queues for messages that arrive before Google Maps finishes loading on slow connections
+    let pendingInitData = null;
+    let pendingBusData = null;
+
+    // 🔒 SECURITY FIX: Escape HTML to prevent XSS in student names
+    function escapeHtml(str) {
+      if (str === null || str === undefined) return "";
+      return String(str)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+    }
+
     // 🟢 5. FIX: Clean Map Style (Hides Businesses, Parks, etc. to focus on roads)
     const cleanMapStyle = [
       { featureType: "poi", elementType: "labels", stylers: [{ visibility: "off" }] },
@@ -113,8 +128,20 @@
         isMapInit = true;
         console.log("✅ Parent Map Ready");
 
+        // Process any messages that arrived while the SDK was still loading
+        if (pendingInitData) {
+          handleInitParentMap(pendingInitData);
+          pendingInitData = null;
+        }
+        if (pendingBusData) {
+          updateBusUI(pendingBusData);
+          pendingBusData = null;
+        }
+
         const readyPayload = { action: "mapIsReady" };
-        if (window.chrome && window.chrome.webview) {
+        if (window.FlutterChan) {
+            window.FlutterChan.postMessage(JSON.stringify(readyPayload));
+        } else if (window.chrome && window.chrome.webview) {
             window.chrome.webview.postMessage(readyPayload);
         } else if (window.parent) {
             window.parent.postMessage(readyPayload, "*");
@@ -183,8 +210,8 @@
           marker.addListener("click", () => {
             let listHtml = `<div class="student-list-popup"><h4>الطلاب (${group.members.length})</h4><ul>`;
             group.members.forEach(m => {
-              // Ensure name exists, fallback to 'طالب'
-              listHtml += `<li>${m.name || m.displayName || 'طالب'}</li>`;
+              const safeName = escapeHtml(m.name || m.displayName || 'طالب');
+              listHtml += `<li>${safeName}</li>`;
             });
             listHtml += `</ul></div>`;
             
@@ -205,7 +232,7 @@
             map: map,
             position: position,
             content: markerContent,
-            title: group.members[0].name || group.members[0].displayName
+            title: String(group.members[0].name || group.members[0].displayName || 'طالب')
           });
         }
         
@@ -220,9 +247,6 @@
       const startLng = (typeof startPos.lng === 'function') ? startPos.lng() : startPos.lng;
       
       const startTime = performance.now();
-      
-      // 🟢 THE FIX: Lowered to 800ms. The bus will smoothly glide to the new spot 
-      // BEFORE the next database update arrives.
       const duration = 800; 
 
       if (animationFrameId) cancelAnimationFrame(animationFrameId);
@@ -287,7 +311,10 @@
     };
 
     function updateBusUI(data) {
-      if (!isMapInit) return;
+      if (!isMapInit) {
+        pendingBusData = data;
+        return;
+      }
       const lat = parseFloat(data.lat);
       const lng = parseFloat(data.lng);
       if (isNaN(lat) || isNaN(lng)) return;
@@ -316,23 +343,38 @@
     // 🟢 NEW SHIELD: Prevent re-initializing if it's already done
     let hasLoadedStudents = false; 
 
+    function handleInitParentMap(data) {
+      if (hasLoadedStudents) return;
+      const myMarkers = data.myMarkers || [];
+      if (myMarkers.length > 0) {
+        hasLoadedStudents = true;
+      }
+      const groups = groupStudents(myMarkers);
+      renderStudentMarkers(groups);
+      recenterView(true);
+    }
+
     // --- 5. MESSAGE LISTENERS ---
     window.addEventListener("message", async (event) => {
-      const data = event.data;
-      if (!data || !isMapInit) return;
+      if (!event.data) return;
+      let data = event.data;
+      if (typeof data === 'string') {
+        try { data = JSON.parse(data); } catch (e) { return; }
+      }
 
       if (data.action === "initParentMap") {
-        // 🟢 THE FIX: If Flutter accidentally sends this multiple times, ignore the duplicates!
-        if (hasLoadedStudents) return; 
-        hasLoadedStudents = true;
-
-        const myMarkers = data.myMarkers || [];
-        const groups = groupStudents(myMarkers);
-        renderStudentMarkers(groups);
-        recenterView(true); 
+        if (!isMapInit) {
+          pendingInitData = data;
+          return;
+        }
+        handleInitParentMap(data);
       }
 
       if (data.action === "updateBusLocation") {
+        if (!isMapInit) {
+          pendingBusData = data;
+          return;
+        }
         updateBusUI(data);
       }
     });
