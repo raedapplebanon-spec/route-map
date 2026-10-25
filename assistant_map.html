@@ -96,6 +96,17 @@
     let animationStartTime = 0;
     const ANIMATION_DURATION = 1000; // Slide takes 1 second (matches GPS update speed)
 
+    // 🔒 SECURITY HELPER: Only used for visual popup HTML
+    function escapeHtml(str) {
+      if (str === null || str === undefined) return "";
+      return String(str)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+    }
+
     function haversineDistance(lat1, lng1, lat2, lng2) {
       const R = 6371e3; 
       const toRad = x => x * Math.PI / 180;
@@ -154,7 +165,7 @@
       const summaryText = document.getElementById("summary-text");
       if (summaryBox && summaryText) {
         summaryBox.style.display = "block";
-        summaryText.innerHTML = "المسافة: <b>" + km + " كم</b><br>الوقت: <b>" + minutes + " دقيقة</b>";
+        summaryText.innerHTML = "المسافة: <b>" + escapeHtml(km) + " كم</b><br>الوقت: <b>" + escapeHtml(minutes) + " دقيقة</b>";
       }
     }
 
@@ -560,17 +571,18 @@
           }
 
           let rows = cluster.items.map(s => {
-              if (s.type === 'assistant') return `<div style="margin-bottom:6px; border-bottom:1px solid #eee; padding-bottom:4px;"><b>${s.name || 'مرافق'}</b></div>`;
+              const safeName = escapeHtml(s.name || (s.type === 'assistant' ? 'مرافق' : 'طالب'));
+              if (s.type === 'assistant') return `<div style="margin-bottom:6px; border-bottom:1px solid #eee; padding-bottom:4px;"><b>${safeName}</b></div>`;
               
               let badgeColor = 'bg-red'; let statusTxt = (currentShift === 'PM') ? 'لم يتم التنزيل' : 'لم يتم التحميل'; 
               if (s.status === 'picked') { badgeColor = 'bg-green'; statusTxt = 'تم التحميل'; }
               else if (s.status === 'dropped') { badgeColor = 'bg-green'; statusTxt = 'تم التنزيل'; }
               else if (s.isExcluded) { badgeColor = 'bg-gray'; statusTxt = 'مستبعد'; }
               
-              let details = s.grade || '';
+              let details = escapeHtml(s.grade || '');
               if (s.type === 'employee') details = 'موظف';
 
-              return `<div style="margin-bottom:6px; border-bottom:1px solid #eee; padding-bottom:4px;"><span class="status-badge ${badgeColor}">${statusTxt}</span><b>${s.name || 'طالب'}</b><br><span style="font-size:12px; color:#555;">${details}</span></div>`;
+              return `<div style="margin-bottom:6px; border-bottom:1px solid #eee; padding-bottom:4px;"><span class="status-badge ${badgeColor}">${statusTxt}</span><b>${safeName}</b><br><span style="font-size:12px; color:#555;">${details}</span></div>`;
           }).join('');
           
           let html = `<div style="color:black;text-align:right;direction:rtl;min-width:180px;"><b style="color:${color}; font-size:14px;">${header}</b><hr>${rows}</div>`;
