@@ -52,6 +52,9 @@
   <script>
     // --- Globals ---
     let map, marker, geocoder, autocomplete;
+    let mapReady = false;
+    let pendingInitialPos = null;
+    let lastInitialPosKey = ""; // 🔒 Prevents 500ms/1500ms retries from snapping the pin back or triple-billing Geocoding
 
     window.initPickerMap = async function() {
       try {
@@ -91,16 +94,12 @@
 
         // 4. SETUP SEARCH
         const input = document.getElementById("pac-input");
-        
-        // Push Search Bar to Top Left
         map.controls[google.maps.ControlPosition.TOP_LEFT].push(input);
 
-        // Reveal Search Box ONLY after map tiles load
         google.maps.event.addListenerOnce(map, 'tilesloaded', () => {
            input.style.display = "block"; 
         });
 
-        // Connect logic
         autocomplete = new google.maps.places.Autocomplete(input);
         autocomplete.bindTo("bounds", map);
 
@@ -109,7 +108,7 @@
           const place = autocomplete.getPlace();
 
           if (!place.geometry || !place.geometry.location) {
-            window.alert("No details available for input: '" + place.name + "'");
+            window.alert("No details available for input: '" + (place.name || "") + "'");
             return;
           }
 
@@ -121,8 +120,6 @@
           }
 
           marker.position = place.geometry.location;
-
-          // Search = User Interaction -> Notify Flutter
           updateFromMarker(true); 
         });
 
@@ -137,27 +134,40 @@
           updateFromMarker(true);
         });
 
+        mapReady = true;
         console.log("✅ Picker Map Initialized");
+
+        // Apply initial position if it arrived before the map finished loading
+        if (pendingInitialPos) {
+          applyInitialPos(pendingInitialPos.lat, pendingInitialPos.lng);
+          pendingInitialPos = null;
+        }
 
       } catch (e) {
         console.error("❌ Map Initialization Failed:", e);
       }
     };
 
+    function applyInitialPos(lat, lng) {
+      const pos = { lat, lng };
+      map.setCenter(pos);
+      marker.position = pos;
+      map.setZoom(17);
+      // Pass FALSE so setting the initial position doesn't trigger onLocationSelected in Flutter
+      updateFromMarker(false);
+    }
+
     // Helper: Update Search Text & App Data
-    // ✅ FIX: Added 'shouldNotify' parameter (defaults to TRUE)
     function updateFromMarker(shouldNotify = true) {
       const pos = marker.position;
       
       const lat = (typeof pos.lat === 'function') ? pos.lat() : pos.lat;
       const lng = (typeof pos.lng === 'function') ? pos.lng() : pos.lng;
       
-      // ✅ FIX: Only send to Flutter if requested (True)
       if (shouldNotify) {
         sendToFlutter(lat, lng);
       }
       
-      // Always update the visual address text
       if (geocoder) {
           geocoder.geocode({ location: {lat, lng} }, (results, status) => {
             if (status === "OK" && results[0]) {
@@ -183,9 +193,10 @@
 
     // Initial Position Handler
     window.addEventListener("message", (event) => {
+      if (!event.data) return;
       let data = event.data;
       if (typeof data === 'string') {
-        try { data = JSON.parse(data); } catch(e) {}
+        try { data = JSON.parse(data); } catch(e) { return; }
       }
 
       if (data && data.action === "setInitialPos") {
@@ -193,20 +204,19 @@
         const lng = parseFloat(data.lng);
         
         if (!isNaN(lat) && !isNaN(lng)) {
-             const pos = { lat, lng };
-             
-             const i = setInterval(() => {
-                 if (map && marker) {
-                     clearInterval(i);
-                     map.setCenter(pos);
-                     marker.position = pos;
-                     map.setZoom(17);
-                     
-                     // ✅ FIX: Pass FALSE here!
-                     // This updates the map/text visually but STOPS the Flutter action from firing.
-                     updateFromMarker(false); 
-                 }
-             }, 100);
+          const posKey = `${lat.toFixed(6)},${lng.toFixed(6)}`;
+          
+          // 🔒 Ignore duplicate 500ms / 1500ms backup retries for the same initial coordinates
+          if (posKey === lastInitialPosKey && mapReady) {
+            return;
+          }
+          lastInitialPosKey = posKey;
+
+          if (!mapReady) {
+            pendingInitialPos = { lat, lng };
+          } else {
+            applyInitialPos(lat, lng);
+          }
         }
       }
     });
