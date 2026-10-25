@@ -9,7 +9,7 @@
     
     .bus-marker-container { pointer-events: none; }
 
-    /* 🟢 2. FIX: Larger Group Marker for Touch Screens (40px instead of 30px) */
+    /* 🟢 Larger Group Marker for Touch Screens (40px) */
     .group-marker {
       background-color: #1a73e8; /* Google Blue */
       color: white;
@@ -31,24 +31,31 @@
     .student-list-popup ul { margin: 0; padding-right: 20px; list-style-type: disc; }
     .student-list-popup li { font-size: 14px; margin-bottom: 4px; color: #333; font-weight: 600;}
 
-    /* Modern Button Styling */
+    /* Modern Pill Button Styling (Used for both Recenter & Satellite Toggle) */
     .custom-map-control {
-      background-color: #fff;
+      background-color: rgba(255, 255, 255, 0.96);
       border: 0;
       border-radius: 20px;
       box-shadow: 0 2px 6px rgba(0,0,0,.3);
       cursor: pointer;
-      margin: 15px;
-      padding: 10px 16px;
-      font-size: 14px;
+      margin: 12px;
+      padding: 9px 14px;
+      font-size: 13px;
       font-weight: bold;
       color: #1a73e8;
       display: flex;
       align-items: center;
       gap: 6px;
-      transition: background-color 0.2s;
+      font-family: 'Segoe UI', Tahoma, sans-serif;
+      transition: all 0.2s ease;
+      user-select: none;
+      -webkit-tap-highlight-color: transparent;
     }
     .custom-map-control:hover { background-color: #f8f9fa; }
+    .custom-map-control.active-satellite {
+      background-color: #1a73e8;
+      color: #ffffff;
+    }
   </style>
 </head>
 <body>
@@ -65,6 +72,7 @@
     
     let animationFrameId = null; 
     let isUserPanned = false;
+    let isSatellite = false;
 
     // 🔒 Queues for messages that arrive before Google Maps finishes loading on slow connections
     let pendingInitData = null;
@@ -81,7 +89,7 @@
         .replace(/'/g, "&#039;");
     }
 
-    // 🟢 5. FIX: Clean Map Style (Hides Businesses, Parks, etc. to focus on roads)
+    // 🟢 Clean Map Style (Hides Businesses, Parks, etc. to focus on roads)
     const cleanMapStyle = [
       { featureType: "poi", elementType: "labels", stylers: [{ visibility: "off" }] },
       { featureType: "transit", elementType: "labels", stylers: [{ visibility: "off" }] }
@@ -97,20 +105,26 @@
         AdvancedMarkerElement = markerLib.AdvancedMarkerElement;
         PinElement = markerLib.PinElement;
 
+        // Check if parent previously selected Satellite view
+        try {
+          isSatellite = localStorage.getItem("parentMapSatellite") === "true";
+        } catch (_) {}
+
         map = new Map(document.getElementById("map"), {
           center: { lat: 33.8938, lng: 35.5018 },
           zoom: 15,
           mapId: "48c2bb983bd19c1c44d95cb7",
+          mapTypeId: isSatellite ? "hybrid" : "roadmap",
           disableDefaultUI: true, // Keep it clean
           zoomControl: true, // Allow zoom
-          styles: cleanMapStyle, // Apply the clean style
-          // 🟢 THE FIX: Forces the map to steal all swipes, preventing the Bottom Sheet from closing!
+          styles: cleanMapStyle,
+          // 🟢 Forces the map to steal all swipes, preventing the Bottom Sheet from closing
           gestureHandling: "greedy"
         });
 
         infoWindow = new google.maps.InfoWindow();
 
-        // RECENTER BUTTON
+        // 1. RECENTER BUTTON (Top Right)
         const recenterBtn = document.createElement("button");
         recenterBtn.innerHTML = "🎯 إعادة التوجيه";
         recenterBtn.classList.add("custom-map-control");
@@ -118,9 +132,32 @@
           isUserPanned = false;
           recenterView(true); 
         });
-
-        // Add button to top right to avoid Bottom Sheet collisions
         map.controls[google.maps.ControlPosition.TOP_RIGHT].push(recenterBtn);
+
+        // 2. 🛰️ SATELLITE TOGGLE BUTTON (Top Left)
+        const satelliteBtn = document.createElement("button");
+        satelliteBtn.classList.add("custom-map-control");
+        const updateSatButtonUI = () => {
+          if (isSatellite) {
+            satelliteBtn.innerHTML = "🗺️ خريطة";
+            satelliteBtn.classList.add("active-satellite");
+          } else {
+            satelliteBtn.innerHTML = "🛰️ قمر صناعي";
+            satelliteBtn.classList.remove("active-satellite");
+          }
+        };
+        updateSatButtonUI();
+
+        satelliteBtn.addEventListener("click", () => {
+          isSatellite = !isSatellite;
+          // 'hybrid' shows satellite imagery WITH street/neighborhood names
+          map.setMapTypeId(isSatellite ? "hybrid" : "roadmap");
+          updateSatButtonUI();
+          try {
+            localStorage.setItem("parentMapSatellite", isSatellite ? "true" : "false");
+          } catch (_) {}
+        });
+        map.controls[google.maps.ControlPosition.TOP_LEFT].push(satelliteBtn);
 
         // Detect dragging
         map.addListener("dragstart", () => { isUserPanned = true; });
@@ -220,7 +257,10 @@
           });
 
         } else {
-          // 🟢 2. FIX: Scaled Student Pin (scale: 1.2 makes it larger)
+          // SINGLE STUDENT MARKER
+          const studentName = String(group.members[0].name || group.members[0].displayName || 'طالب');
+          const safeName = escapeHtml(studentName);
+
           const pin = new PinElement({ 
             background: "#00c853", 
             glyphColor: "white",
@@ -232,7 +272,14 @@
             map: map,
             position: position,
             content: markerContent,
-            title: String(group.members[0].name || group.members[0].displayName || 'طالب')
+            title: studentName
+          });
+
+          // 🟢 Added click popup for single student pin too
+          marker.addListener("click", () => {
+            const singleHtml = `<div class="student-list-popup"><h4>📍 موقع الطالب</h4><b>${safeName}</b></div>`;
+            infoWindow.setContent(singleHtml);
+            infoWindow.open(map, marker);
           });
         }
         
@@ -290,10 +337,10 @@
       });
 
       if (hasPoints && forceFit) {
-        // 🟢 4. FIX: Bottom Padding 150px to prevent the BottomSheet from hiding markers
+        // 🟢 Bottom Padding 150px to prevent the BottomSheet from hiding markers
         map.fitBounds(bounds, { top: 80, bottom: 150, left: 50, right: 50 });
         
-        // 🟢 3. FIX: Smart Zoom - Prevent extreme zooming if bounds are too small
+        // 🟢 Smart Zoom - Prevent extreme zooming if bounds are too small
         const listener = google.maps.event.addListener(map, "idle", function() {
           if (map.getZoom() > 17) {
             map.setZoom(17);
@@ -321,7 +368,6 @@
       const busPos = { lat, lng };
 
       if (!busMarker) {
-        // 🟢 2. FIX: Bus Icon scaled to 1.6 to make it very clear
         const busPin = new PinElement({ background: "#FBBC04", glyphText: "🚌", scale: 1.6 });
         const container = document.createElement('div');
         container.className = 'bus-marker-container';
@@ -340,7 +386,7 @@
       if (!isUserPanned) recenterView(false); 
     }
 
-    // 🟢 NEW SHIELD: Prevent re-initializing if it's already done
+    // 🟢 Prevent re-initializing if it's already done
     let hasLoadedStudents = false; 
 
     function handleInitParentMap(data) {
